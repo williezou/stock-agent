@@ -32,8 +32,10 @@ const REQUEST_DELAY_MS = 120; // 轻微节流，避免触发限流
 const EM_BASE_URL = "https://push2.eastmoney.com/api/qt/clist/get";
 const EM_NEWS_URL = "https://so.eastmoney.com/news/s";
 const EM_DC_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get";
+const HOLIDAY_API = "https://date.nager.at/api/v3/PublicHolidays";
 const NEWS_MIN_SCORE_THRESHOLD = 4; // 只有接近阈值的才拉新闻，减少请求量
 const CANDIDATE_PER_STYLE = 20;
+const CN_TIMEZONE = "Asia/Shanghai";
 
 // =====================
 // 获取A股列表（简化版）
@@ -117,6 +119,46 @@ function formatError(e) {
     if (!e) return "";
     const msg = e.message || e.toString();
     return maskSecrets(msg);
+}
+
+function getChinaToday() {
+    const now = new Date();
+    const dateStr = new Intl.DateTimeFormat("en-CA", {
+        timeZone: CN_TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).format(now);
+    const weekday = new Intl.DateTimeFormat("en-US", {
+        timeZone: CN_TIMEZONE,
+        weekday: "short"
+    }).format(now);
+    return { dateStr, weekday };
+}
+
+async function fetchChinaHolidays(year) {
+    const res = await requestWithRetry(() =>
+        httpClient.get(`${HOLIDAY_API}/${year}/CN`)
+    );
+    const list = Array.isArray(res.data) ? res.data : [];
+    return new Set(list.map(item => item.date));
+}
+
+async function isTradingDay() {
+    const { dateStr, weekday } = getChinaToday();
+    if (weekday === "Sat" || weekday === "Sun") {
+        return { ok: false, reason: "周末", dateStr };
+    }
+    try {
+        const year = dateStr.slice(0, 4);
+        const holidays = await fetchChinaHolidays(year);
+        if (holidays.has(dateStr)) {
+            return { ok: false, reason: "法定节假日", dateStr };
+        }
+    } catch (e) {
+        console.log("⚠️ 节假日检查失败，将继续执行:", formatError(e));
+    }
+    return { ok: true, reason: "", dateStr };
 }
 
 async function requestWithRetry(fn, retries = 3) {
@@ -275,6 +317,12 @@ function scoreByStyle(style, features, news, announcements) {
 async function runScanner() {
     console.log("🚀 开始扫描...");
 
+    const trading = await isTradingDay();
+    if (!trading.ok) {
+        console.log(`🛑 非交易日（${trading.reason}）：${trading.dateStr}`);
+        return {};
+    }
+
     let stocks;
     try {
         stocks = await getStocks();
@@ -376,7 +424,10 @@ async function runScanner() {
         console.table(resultsByStyle[style]);
     }
 
-    const now = new Date().toLocaleString("zh-CN", { hour12: false });
+    const now = new Date().toLocaleString("zh-CN", {
+        timeZone: CN_TIMEZONE,
+        hour12: false
+    });
 
     const styleLabels = {
         intraday: "日内",
