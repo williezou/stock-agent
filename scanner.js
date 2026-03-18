@@ -51,6 +51,18 @@ const NEWS_MIN_SCORE_THRESHOLD = 4; // 只有接近阈值的才拉新闻，减�
 const CANDIDATE_PER_STYLE = 20;
 const CN_TIMEZONE = "Asia/Shanghai";
 const DEBUG = process.env.DEBUG === "1";
+const NEWS_CONTENT_MAX_CHARS = 120;
+const NEWSNOW_SOURCE_LABELS = {
+    "wallstreetcn-quick": "华尔街见闻-快讯",
+    "wallstreetcn-news": "华尔街见闻-新闻",
+    "wallstreetcn-hot": "华尔街见闻-热门",
+    "cls-telegraph": "财联社-电报",
+    "cls-hot": "财联社-热门",
+    "xueqiu-hotstock": "雪球-热门",
+    "jin10": "金十数据",
+    "gelonghui": "格隆汇",
+    "fastbull-express": "FastBull"
+};
 
 // =====================
 // 获取A股列表（简化版）
@@ -199,6 +211,21 @@ function decodeHtml(text) {
         .replace(/&#39;/g, "'");
 }
 
+function escapeHtml(text) {
+    return String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function truncate(text, max) {
+    if (!text) return "";
+    const t = String(text).trim();
+    return t.length > max ? t.slice(0, max - 1) + "…" : t;
+}
+
 function toEmCode(symbol) {
     if (!symbol) return "";
     const s = symbol.toString().trim();
@@ -250,10 +277,36 @@ function normalizeNewsItem(item) {
         "Time"
     ]);
     const url = pickFirst(item, ["URL", "Url", "url", "LINK", "link", "SOURCEURL"]);
+    const source = pickFirst(item, [
+        "SOURCE",
+        "source",
+        "SOURCE_NAME",
+        "SOURCENAME",
+        "MEDIA",
+        "media",
+        "ORIGIN",
+        "origin"
+    ]);
+    const content = pickFirst(item, [
+        "CONTENT",
+        "CONTENT_TEXT",
+        "SUMMARY",
+        "SUMMARY_TEXT",
+        "ABSTRACT",
+        "BRIEF",
+        "DESC",
+        "DESCRIPTION",
+        "content",
+        "summary",
+        "description",
+        "digest"
+    ]);
     return {
         title: title || "",
         time: time ? time.toString().slice(0, 19) : "",
-        url: url || ""
+        url: url || "",
+        content: content || "",
+        source: source || ""
     };
 }
 
@@ -280,6 +333,16 @@ function normalizeNoticeItem(item) {
         date: date ? date.toString().slice(0, 10) : "",
         url: url || ""
     };
+}
+
+function sourceFromUrl(url) {
+    if (!url) return "";
+    try {
+        const u = new URL(url);
+        return u.hostname.replace(/^www\./, "");
+    } catch {
+        return "";
+    }
 }
 
 function mergeNewsLists(a, b) {
@@ -309,7 +372,9 @@ async function fetchNewsNowSource(id) {
     return items.map(it => ({
         title: it.title || "",
         time: (it.pubDate || it.time || "").toString().slice(0, 19),
-        url: it.url || ""
+        url: it.url || "",
+        content: it.content || it.summary || it.desc || it.description || "",
+        source: NEWSNOW_SOURCE_LABELS[id] || id
     }));
 }
 
@@ -427,9 +492,14 @@ async function getNews(symbol) {
     }
     const titleRegex = /<div class="news_item_t">\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/g;
     const timeRegex = /<span class="news_item_time">([^<]+)<\/span>/g;
+    const contentRegexList = [
+        /<div class="news_item_c">([\s\S]*?)<\/div>/g,
+        /<p class="news_item_des">([\s\S]*?)<\/p>/g
+    ];
 
     const titles = [];
     const times = [];
+    const contents = [];
     let m;
 
     while ((m = titleRegex.exec(html)) !== null) {
@@ -442,10 +512,19 @@ async function getNews(symbol) {
         times.push(m[1].trim());
     }
 
+    for (const rgx of contentRegexList) {
+        while ((m = rgx.exec(html)) !== null) {
+            const raw = m[1].replace(/<[^>]+>/g, "").trim();
+            if (raw) contents.push(decodeHtml(raw));
+        }
+        if (contents.length) break;
+    }
+
     const count = Math.min(titles.length, times.length);
     return titles.slice(0, count).map((t, i) => ({
         ...t,
-        time: times[i]
+        time: times[i],
+        content: contents[i] || ""
     }));
 }
 
@@ -722,9 +801,13 @@ async function runScanner() {
             if (!r.news || r.news.length === 0) return [];
             const head = `${r.symbol} ${r.name || ""} 新闻:`;
             const items = r.news.map(n => {
-                const title = (n.title || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const title = escapeHtml(n.title || "");
                 const url = n.url || "";
-                return url ? `- <a href="${url}">${title}</a>` : `- ${title}`;
+                const content = truncate(n.content || "", NEWS_CONTENT_MAX_CHARS);
+                const contentText = content ? `（${escapeHtml(content)}）` : "（无摘要）";
+                const source = escapeHtml(n.source || sourceFromUrl(url) || "来源未知");
+                const prefix = `［${source}］`;
+                return url ? `- ${prefix} <a href="${url}">${title}</a> ${contentText}` : `- ${prefix} ${title} ${contentText}`;
             });
             return [head, ...items];
         });
