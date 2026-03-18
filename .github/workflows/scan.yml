@@ -2,7 +2,7 @@ name: stock scan
 
 on:
   schedule:
-    - cron: "30 1 * * 1-5" # UTC 01:30 = 北京时间 09:30，工作日
+    - cron: "0 7 * * 1-5" # UTC 07:00 = 北京时间 15:00，工作日
   workflow_dispatch:
 
 jobs:
