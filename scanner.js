@@ -100,6 +100,25 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function maskSecrets(text) {
+    if (!text) return text;
+    let out = String(text);
+    const secrets = [
+        process.env.TELEGRAM_BOT_TOKEN,
+        process.env.TELEGRAM_CHAT_ID
+    ].filter(Boolean);
+    for (const s of secrets) {
+        if (s) out = out.split(s).join("****");
+    }
+    return out;
+}
+
+function formatError(e) {
+    if (!e) return "";
+    const msg = e.message || e.toString();
+    return maskSecrets(msg);
+}
+
 async function requestWithRetry(fn, retries = 3) {
     let attempt = 0;
     while (true) {
@@ -260,7 +279,7 @@ async function runScanner() {
     try {
         stocks = await getStocks();
     } catch (e) {
-        console.log("❌ 拉取A股列表失败:", e.code || e.message || e);
+        console.log("❌ 拉取A股列表失败:", e.code || formatError(e) || e);
         return {};
     }
 
@@ -413,7 +432,7 @@ async function runScanner() {
     try {
         await sendTelegram(msg);
     } catch (e) {
-        console.log("⚠️ Telegram 发送失败:", e.message || e);
+        console.log("⚠️ Telegram 发送失败:", formatError(e) || e);
     }
 
     return resultsByStyle;
