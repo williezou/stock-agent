@@ -3,10 +3,11 @@ const axios = require("axios");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const { sendTelegram } = require("./telegram");
 const { createNewsService } = require("./news");
-const { computeFeatures, scoreByStyle } = require("./scoring");
+const { computeFeatures, scoreByStyle, scoreByStyleRelaxed } = require("./scoring");
 const { applyStockFilters } = require("./filters");
-const { isTradingDay, nowChinaString } = require("./calendar");
+const { isTradingDay, nowChinaString, chinaDateString } = require("./calendar");
 const { formatTelegramMessage } = require("./format");
+const { createMarketService } = require("./market");
 
 const PROXY_URL =
     process.env.HTTPS_PROXY ||
@@ -37,6 +38,9 @@ const EM_BASE_URL = "https://push2.eastmoney.com/api/qt/clist/get";
 const NEWS_MIN_SCORE_THRESHOLD = 4; // 只有接近阈值的才拉新闻，减少请求量
 const CANDIDATE_PER_STYLE = 20;
 const DEBUG = process.env.DEBUG === "1";
+const MID_BREAKOUT_LOOKBACK = 55;
+const MID_BREAKOUT_BUFFER = 0.005; // 0.5% 突破
+const MID_MIN_VOL_RATIO = 1.3;
 
 // =====================
 // 获取A股列表（简化版）
@@ -147,6 +151,7 @@ const newsService = createNewsService({
     DEBUG,
     formatError
 });
+const marketService = createMarketService({ httpClient, requestWithRetry });
 
 // =====================
 // 主流程
@@ -241,44 +246,65 @@ async function runScanner() {
 
     const resultsByStyle = {};
     const fullLists = {};
+    const strictCounts = {};
+    const relaxedCounts = {};
+    const fallbackCounts = {};
+    console.log(`📊 股票池数量: ${filtered.length}`);
+
+    function buildListWithScorer(style, scorer) {
+        return filtered
+            .map(item => {
+                const enriched = enrichedMap.get(item.symbol) || item;
+                const score = scorer(style, item.features, enriched.news || [], enriched.announcements || []);
+                if (score === null) return null;
+                return {
+                    symbol: item.symbol,
+                    name: item.name,
+                    score,
+                    gap: (item.features.gap * 100).toFixed(2) + "%",
+                    volume: item.features.volume,
+                    newsCount: (enriched.news || []).length,
+                    annCount: (enriched.announcements || []).length,
+                    news: (enriched.news || []).slice(0, 3),
+                    announcements: (enriched.announcements || []).slice(0, 3)
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score);
+    }
     for (const style of styles) {
-        let list = filtered.map(item => {
-            const enriched = enrichedMap.get(item.symbol) || item;
-            const score = scoreByStyle(style, item.features, enriched.news || [], enriched.announcements || []);
-            if (score === null) return null;
-            return {
-                symbol: item.symbol,
-                name: item.name,
-                score,
-                gap: (item.features.gap * 100).toFixed(2) + "%",
-                volume: item.features.volume,
-                newsCount: (enriched.news || []).length,
-                annCount: (enriched.announcements || []).length,
-                news: (enriched.news || []).slice(0, 3),
-                announcements: (enriched.announcements || []).slice(0, 3)
-            };
-        }).filter(Boolean);
-        list.sort((a, b) => b.score - a.score);
-        if (style === "mid" && list.length === 0) {
-            // 兜底：低涨幅 + 高流动性
-            list = filtered
-                .filter(item => item.features.changePct <= 0.03 && item.features.changePct >= -0.02)
-                .map(item => {
-                    const enriched = enrichedMap.get(item.symbol) || item;
-                    return {
-                        symbol: item.symbol,
-                        name: item.name,
-                        score: item.features.volumeScore,
-                        gap: (item.features.gap * 100).toFixed(2) + "%",
-                        volume: item.features.volume,
-                        newsCount: (enriched.news || []).length,
-                        annCount: (enriched.announcements || []).length,
-                        news: (enriched.news || []).slice(0, 3),
-                        announcements: (enriched.announcements || []).slice(0, 3)
-                    };
-                });
-            list.sort((a, b) => b.score - a.score);
+        let list = buildListWithScorer(style, scoreByStyle);
+        strictCounts[style] = list.length;
+
+        if (list.length === 0) {
+            list = buildListWithScorer(style, scoreByStyleRelaxed);
+            relaxedCounts[style] = list.length;
+        } else {
+            relaxedCounts[style] = 0;
         }
+
+        if (list.length === 0) {
+            // 最终兜底：按流动性选前5，保证不空
+            list = filtered
+                .slice()
+                .sort((a, b) => b.features.volumeScore - a.features.volumeScore)
+                .map(item => ({
+                    symbol: item.symbol,
+                    name: item.name,
+                    score: item.features.volumeScore,
+                    gap: (item.features.gap * 100).toFixed(2) + "%",
+                    volume: item.features.volume,
+                    newsCount: (enrichedMap.get(item.symbol)?.news || []).length,
+                    annCount: (enrichedMap.get(item.symbol)?.announcements || []).length,
+                    news: (enrichedMap.get(item.symbol)?.news || []).slice(0, 3),
+                    announcements: (enrichedMap.get(item.symbol)?.announcements || []).slice(0, 3)
+                }))
+                .slice(0, 5);
+            fallbackCounts[style] = list.length;
+        } else {
+            fallbackCounts[style] = 0;
+        }
+
         fullLists[style] = list;
     }
 
@@ -316,12 +342,69 @@ async function runScanner() {
                 assigned.add(it.symbol);
             }
         }
+        // 若去重后仍不足，允许少量重复补足
+        if (out.length < 5) {
+            for (const it of list) {
+                if (out.length >= 5) break;
+                if (out.includes(it)) continue;
+                out.push(it);
+            }
+        }
         resultsByStyle[style] = out;
     }
 
     for (const style of styles) {
+        if (strictCounts[style] === 0 && relaxedCounts[style] > 0) {
+            console.log(`\n⚠️ ${style} 严格条件为空，已启用放宽规则（数量: ${relaxedCounts[style]}）`);
+        }
+        if (strictCounts[style] === 0 && relaxedCounts[style] === 0 && fallbackCounts[style] > 0) {
+            console.log(`\n⚠️ ${style} 严格/放宽均为空，已启用流动性兜底（数量: ${fallbackCounts[style]}）`);
+        }
         console.log(`\n🔥 ${style} Top 5：`);
         console.table(resultsByStyle[style]);
+    }
+
+    // 中线买点：突破型
+    if (resultsByStyle.mid && resultsByStyle.mid.length > 0) {
+        const midWithBuy = await runPool(resultsByStyle.mid, async (item, i) => {
+            try {
+                if (REQUEST_DELAY_MS > 0 && i > 0) {
+                    await delay(REQUEST_DELAY_MS);
+                }
+                const klines = await marketService.getDailyKline(item.symbol, MID_BREAKOUT_LOOKBACK + 5);
+                if (!klines || klines.length < MID_BREAKOUT_LOOKBACK) return item;
+
+                const last = klines[klines.length - 1];
+                const today = chinaDateString();
+                const hist = last.date === today ? klines.slice(0, -1) : klines;
+                const recent = hist.slice(-MID_BREAKOUT_LOOKBACK);
+                if (recent.length === 0) return item;
+
+                const maxHigh = Math.max(...recent.map(k => k.high));
+                const avgVol = recent.reduce((s, k) => s + k.volume, 0) / recent.length;
+                const entry = maxHigh * (1 + MID_BREAKOUT_BUFFER);
+                const volRatio = avgVol > 0 ? item.volume / avgVol : 0;
+                const stop = Math.max(
+                    Math.min(...recent.map(k => k.low)),
+                    entry * 0.94
+                );
+                const trigger = item.price >= entry && volRatio >= MID_MIN_VOL_RATIO;
+                if (!trigger) return { ...item, buy: null };
+
+                return {
+                    ...item,
+                    buy: {
+                        entry,
+                        stop,
+                        volRatio
+                    }
+                };
+            } catch {
+                return item;
+            }
+        }, Math.min(CONCURRENCY, resultsByStyle.mid.length));
+
+        resultsByStyle.mid = midWithBuy;
     }
 
     const now = nowChinaString();

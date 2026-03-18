@@ -8,6 +8,19 @@ const SWING_MAX_RISE = 0.03; // 波段最大涨幅
 const SWING_MAX_VOL = 0.05; // 波段最大波动
 const GAP_THRESHOLD = 0.03;
 
+// 放宽版阈值（兜底）
+const RELAXED = {
+    intradayMinMove: 0.02,
+    shortMinRise: 0.01,
+    shortMaxRise: 0.08,
+    swingMinRise: -0.01,
+    swingMaxRise: 0.05,
+    swingMaxVol: 0.06,
+    midMaxChange: 0.03,
+    midMaxVol: 0.03,
+    midMinChange: -0.02
+};
+
 function computeFeatures(stock) {
     const gap = stock.prevClose > 0 ? (stock.price - stock.prevClose) / stock.prevClose : 0;
     const changePct = (stock.changePct || 0) / 100;
@@ -62,4 +75,48 @@ function scoreByStyle(style, features, news, announcements) {
     return score;
 }
 
-module.exports = { computeFeatures, scoreByStyle };
+function scoreByStyleRelaxed(style, features, news, announcements) {
+    const hasCatalyst = (news && news.length > 0) || (announcements && announcements.length > 0);
+    let score = 0;
+
+    if (style === "intraday") {
+        if (features.volatility < RELAXED.intradayMinMove) return null;
+        score += Math.min(features.volatility * 120, 6);
+        score += Math.min(features.volumeScore, 4);
+        if (Math.abs(features.gap) >= GAP_THRESHOLD) score += 2;
+        if (hasCatalyst) score += 2;
+    } else if (style === "short") {
+        if (features.changePct < RELAXED.shortMinRise || features.changePct > RELAXED.shortMaxRise) return null;
+        score += Math.min(Math.max(features.changePct, 0) * 120, 6);
+        score += Math.min(features.volumeScore, 3);
+        if (features.trendUp) score += 1;
+        if (hasCatalyst) score += 2;
+    } else if (style === "swing") {
+        if (
+            features.volatility > RELAXED.swingMaxVol ||
+            features.changePct < RELAXED.swingMinRise ||
+            features.changePct > RELAXED.swingMaxRise
+        ) {
+            return null;
+        }
+        score += Math.min(Math.max(features.changePct, 0) * 80, 4);
+        score += Math.min(features.volumeScore, 3);
+        if (hasCatalyst) score += 1;
+    } else if (style === "mid") {
+        if (
+            features.changePct > RELAXED.midMaxChange ||
+            features.changePct < RELAXED.midMinChange ||
+            features.volatility > RELAXED.midMaxVol
+        ) {
+            return null;
+        }
+        score += Math.min(Math.max(features.changePct, 0) * 30, 2.0);
+        score += Math.min(features.volumeScore, 3.0);
+        if (hasCatalyst) score += 1;
+        if (features.changePct < -0.01) score -= 1.5;
+    }
+
+    return score;
+}
+
+module.exports = { computeFeatures, scoreByStyle, scoreByStyleRelaxed };

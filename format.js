@@ -29,9 +29,14 @@ function formatTelegramMessage({ resultsByStyle, now, newsService }) {
         const symbolLine = top5.length
             ? `代码: <code>${top5.map(r => r.symbol).join(" ")}</code>`
             : "";
-        const lines = top5.map((r, i) =>
-            `${i + 1}. <code>${r.symbol}</code> ${r.name || ""} | 分数:${r.score.toFixed(2)} | 涨幅:${r.gap} | 量:${r.volume} | 新闻:${r.newsCount || 0} | 公告:${r.annCount || 0}`
-        );
+        const lines = top5.map((r, i) => {
+            const scoreText = Number.isFinite(r.score) ? r.score.toFixed(1) : r.score;
+            const base = `${i + 1}. <code>${r.symbol}</code> ${r.name || ""} | 分数:${scoreText} | 涨幅:${r.gap} | 量:${r.volume} | 新闻:${r.newsCount || 0} | 公告:${r.annCount || 0}`;
+            if (style !== "mid") return base;
+            if (!r.buy) return `${base} | 买点: 无`;
+            const buy = `买点:${r.buy.entry.toFixed(2)} 止损:${r.buy.stop.toFixed(2)} 量比:${r.buy.volRatio.toFixed(2)}`;
+            return `${base} | ${buy}`;
+        });
         const newsLines = top5.flatMap(r => {
             if (!r.news || r.news.length === 0) return [];
             const head = `${r.symbol} ${r.name || ""} 新闻:`;

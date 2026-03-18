@@ -50,4 +50,8 @@ function nowChinaString() {
     });
 }
 
-module.exports = { isTradingDay, nowChinaString };
+function chinaDateString() {
+    return getChinaToday().dateStr;
+}
+
+module.exports = { isTradingDay, nowChinaString, chinaDateString };
