@@ -10,14 +10,15 @@ const PROXY_URL =
     process.env.http_proxy;
 
 const httpClient = (() => {
-    if (!PROXY_URL) return axios;
+    if (!PROXY_URL) return axios.create({ timeout: 10000 });
     const masked = PROXY_URL.replace(/\/\/.*@/, "//****@");
     console.log(`🧭 使用代理: ${masked}`);
     const agent = new HttpsProxyAgent(PROXY_URL);
     return axios.create({
         httpAgent: agent,
         httpsAgent: agent,
-        proxy: false
+        proxy: false,
+        timeout: 10000
     });
 })();
 
@@ -53,13 +54,15 @@ async function getStocks() {
         _: Date.now()
     };
 
-    const res = await httpClient.get(EM_BASE_URL, {
-        params,
-        headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://quote.eastmoney.com/"
-        }
-    });
+    const res = await requestWithRetry(() =>
+        httpClient.get(EM_BASE_URL, {
+            params,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://quote.eastmoney.com/"
+            }
+        })
+    );
     const diff = (res.data && res.data.data && res.data.data.diff) || [];
 
     return diff.map(d => ({
@@ -97,6 +100,20 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function requestWithRetry(fn, retries = 3) {
+    let attempt = 0;
+    while (true) {
+        try {
+            return await fn();
+        } catch (e) {
+            attempt++;
+            if (attempt > retries) throw e;
+            const backoff = 300 * attempt;
+            await delay(backoff);
+        }
+    }
+}
+
 function decodeHtml(text) {
     return text
         .replace(/&amp;/g, "&")
@@ -110,13 +127,15 @@ function decodeHtml(text) {
 // 获取新闻（东方财富搜索）
 // =====================
 async function getNews(symbol) {
-    const res = await httpClient.get(EM_NEWS_URL, {
-        params: { keyword: symbol },
-        headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://so.eastmoney.com/"
-        }
-    });
+    const res = await requestWithRetry(() =>
+        httpClient.get(EM_NEWS_URL, {
+            params: { keyword: symbol },
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://so.eastmoney.com/"
+            }
+        })
+    );
 
     const html = res.data || "";
     const titleRegex = /<div class="news_item_t">\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/g;
@@ -147,23 +166,25 @@ async function getNews(symbol) {
 // 获取公告（东方财富数据中心）
 // =====================
 async function getAnnouncements(symbol) {
-    const res = await httpClient.get(EM_DC_URL, {
-        params: {
-            reportName: "RPT_PUBLIC_ANNOUNCEMENT",
-            columns: "ALL",
-            filter: `(SECURITY_CODE="${symbol}")`,
-            pageNumber: 1,
-            pageSize: 5,
-            sortColumns: "NOTICE_DATE",
-            sortTypes: "-1",
-            source: "WEB",
-            client: "WEB"
-        },
-        headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://data.eastmoney.com/"
-        }
-    });
+    const res = await requestWithRetry(() =>
+        httpClient.get(EM_DC_URL, {
+            params: {
+                reportName: "RPT_PUBLIC_ANNOUNCEMENT",
+                columns: "ALL",
+                filter: `(SECURITY_CODE="${symbol}")`,
+                pageNumber: 1,
+                pageSize: 5,
+                sortColumns: "NOTICE_DATE",
+                sortTypes: "-1",
+                source: "WEB",
+                client: "WEB"
+            },
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://data.eastmoney.com/"
+            }
+        })
+    );
 
     const data = (res.data && res.data.result && res.data.result.data) || [];
     return data.map(item => {
@@ -235,7 +256,13 @@ function scoreByStyle(style, features, news, announcements) {
 async function runScanner() {
     console.log("🚀 开始扫描...");
 
-    const stocks = await getStocks();
+    let stocks;
+    try {
+        stocks = await getStocks();
+    } catch (e) {
+        console.log("❌ 拉取A股列表失败:", e.code || e.message || e);
+        return {};
+    }
 
     const baseResults = await runPool(stocks, async (stock, i) => {
         try {
