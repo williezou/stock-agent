@@ -4,6 +4,9 @@ const { HttpsProxyAgent } = require("https-proxy-agent");
 const { sendTelegram } = require("./telegram");
 const { createNewsService } = require("./news");
 const { computeFeatures, scoreByStyle } = require("./scoring");
+const { applyStockFilters } = require("./filters");
+const { isTradingDay, nowChinaString } = require("./calendar");
+const { formatTelegramMessage } = require("./format");
 
 const PROXY_URL =
     process.env.HTTPS_PROXY ||
@@ -31,13 +34,9 @@ const MIN_PREMARKET_VOLUME = 1000000;
 const CONCURRENCY = 5;
 const REQUEST_DELAY_MS = 120; // 轻微节流，避免触发限流
 const EM_BASE_URL = "https://push2.eastmoney.com/api/qt/clist/get";
-const HOLIDAY_API = "https://date.nager.at/api/v3/PublicHolidays";
 const NEWS_MIN_SCORE_THRESHOLD = 4; // 只有接近阈值的才拉新闻，减少请求量
 const CANDIDATE_PER_STYLE = 20;
-const CN_TIMEZONE = "Asia/Shanghai";
 const DEBUG = process.env.DEBUG === "1";
-const NEWS_CONTENT_MAX_CHARS = 120;
-const NEW_STOCK_DAYS = 180; // 次新股排除窗口（天）
 
 // =====================
 // 获取A股列表（简化版）
@@ -80,30 +79,7 @@ async function getStocks() {
         listingDate: d.f26 || ""
     }));
 
-    const today = new Date();
-    const cutoff = new Date(today.getTime() - NEW_STOCK_DAYS * 24 * 3600 * 1000);
-
-    return list.filter(s => {
-        const code = String(s.symbol || "");
-        const name = String(s.name || "");
-
-        // 排除：北交所
-        if (code.startsWith("8") || code.startsWith("4")) return false;
-
-        // 排除：科创板（688/689）
-        if (code.startsWith("688") || code.startsWith("689")) return false;
-
-        // 排除：ST / 退市
-        if (name.includes("ST") || name.includes("退")) return false;
-
-        // 排除：次新股（上市不足 NEW_STOCK_DAYS）
-        if (s.listingDate) {
-            const d = new Date(s.listingDate);
-            if (!isNaN(d) && d > cutoff) return false;
-        }
-
-        return true;
-    });
+    return applyStockFilters(list);
 }
 
 // =====================
@@ -149,46 +125,6 @@ function formatError(e) {
     return maskSecrets(msg);
 }
 
-function getChinaToday() {
-    const now = new Date();
-    const dateStr = new Intl.DateTimeFormat("en-CA", {
-        timeZone: CN_TIMEZONE,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-    }).format(now);
-    const weekday = new Intl.DateTimeFormat("en-US", {
-        timeZone: CN_TIMEZONE,
-        weekday: "short"
-    }).format(now);
-    return { dateStr, weekday };
-}
-
-async function fetchChinaHolidays(year) {
-    const res = await requestWithRetry(() =>
-        httpClient.get(`${HOLIDAY_API}/${year}/CN`)
-    );
-    const list = Array.isArray(res.data) ? res.data : [];
-    return new Set(list.map(item => item.date));
-}
-
-async function isTradingDay() {
-    const { dateStr, weekday } = getChinaToday();
-    if (weekday === "Sat" || weekday === "Sun") {
-        return { ok: false, reason: "周末", dateStr };
-    }
-    try {
-        const year = dateStr.slice(0, 4);
-        const holidays = await fetchChinaHolidays(year);
-        if (holidays.has(dateStr)) {
-            return { ok: false, reason: "法定节假日", dateStr };
-        }
-    } catch (e) {
-        console.log("⚠️ 节假日检查失败，将继续执行:", formatError(e));
-    }
-    return { ok: true, reason: "", dateStr };
-}
-
 async function requestWithRetry(fn, retries = 3) {
     let attempt = 0;
     while (true) {
@@ -212,28 +148,13 @@ const newsService = createNewsService({
     formatError
 });
 
-function escapeHtml(text) {
-    return String(text || "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
-function truncate(text, max) {
-    if (!text) return "";
-    const t = String(text).trim();
-    return t.length > max ? t.slice(0, max - 1) + "…" : t;
-}
-
 // =====================
 // 主流程
 // =====================
 async function runScanner() {
     console.log("🚀 开始扫描...");
 
-    const trading = await isTradingDay();
+    const trading = await isTradingDay({ httpClient, requestWithRetry, formatError });
     if (!trading.ok) {
         console.log(`🛑 非交易日（${trading.reason}）：${trading.dateStr}`);
         return {};
@@ -403,65 +324,8 @@ async function runScanner() {
         console.table(resultsByStyle[style]);
     }
 
-    const now = new Date().toLocaleString("zh-CN", {
-        timeZone: CN_TIMEZONE,
-        hour12: false
-    });
-
-    const styleLabels = {
-        intraday: "日内",
-        short: "短线",
-        swing: "波段",
-        mid: "中线"
-    };
-
-    const sections = [];
-    for (const style of styles) {
-        const top5 = resultsByStyle[style];
-        const symbolLine = top5.length
-            ? `代码: <code>${top5.map(r => r.symbol).join(" ")}</code>`
-            : "";
-        const lines = top5.map((r, i) =>
-            `${i + 1}. <code>${r.symbol}</code> ${r.name || ""} | 分数:${r.score.toFixed(2)} | 涨幅:${r.gap} | 量:${r.volume} | 新闻:${r.newsCount || 0} | 公告:${r.annCount || 0}`
-        );
-        const newsLines = top5.flatMap(r => {
-            if (!r.news || r.news.length === 0) return [];
-            const head = `${r.symbol} ${r.name || ""} 新闻:`;
-            const items = r.news.map(n => {
-                const title = escapeHtml(n.title || "");
-                const url = n.url || "";
-                const content = truncate(n.content || "", NEWS_CONTENT_MAX_CHARS);
-                const contentText = content ? `（${escapeHtml(content)}）` : "（无摘要）";
-                const source = escapeHtml(n.source || newsService.sourceFromUrl(url) || "来源未知");
-                const prefix = `［${source}］`;
-                return url ? `- ${prefix} <a href="${url}">${title}</a> ${contentText}` : `- ${prefix} ${title} ${contentText}`;
-            });
-            return [head, ...items];
-        });
-        const annLines = top5.flatMap(r => {
-            if (!r.announcements || r.announcements.length === 0) return [];
-            const head = `${r.symbol} ${r.name || ""} 公告:`;
-            const items = r.announcements.map(a => {
-                const title = (a.title || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const url = a.url || "";
-                return url ? `- <a href="${url}">${title}</a>` : `- ${title}`;
-            });
-            return [head, ...items];
-        });
-
-        const block =
-            `<b>${styleLabels[style]} Top5</b>\n` +
-            (lines.length ? lines.join("\n") : "无符合条件标的") +
-            (symbolLine ? `\n${symbolLine}` : "") +
-            (newsLines.length ? `\n<b>新闻详情</b>\n${newsLines.join("\n")}` : "") +
-            (annLines.length ? `\n<b>公告详情</b>\n${annLines.join("\n")}` : "");
-        sections.push(block);
-    }
-
-    const msg =
-        `<b>A股扫描</b>\n` +
-        `${now}\n\n` +
-        sections.join("\n\n");
+    const now = nowChinaString();
+    const msg = formatTelegramMessage({ resultsByStyle, now, newsService });
 
     try {
         await sendTelegram(msg);
