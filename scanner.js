@@ -3,6 +3,7 @@ const axios = require("axios");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const { sendTelegram } = require("./telegram");
 const { createNewsService } = require("./news");
+const { computeFeatures, scoreByStyle } = require("./scoring");
 
 const PROXY_URL =
     process.env.HTTPS_PROXY ||
@@ -27,7 +28,6 @@ const httpClient = (() => {
 // 配置
 // =====================
 const MIN_PREMARKET_VOLUME = 1000000;
-const GAP_THRESHOLD = 0.03;
 const CONCURRENCY = 5;
 const REQUEST_DELAY_MS = 120; // 轻微节流，避免触发限流
 const EM_BASE_URL = "https://push2.eastmoney.com/api/qt/clist/get";
@@ -37,15 +37,7 @@ const CANDIDATE_PER_STYLE = 20;
 const CN_TIMEZONE = "Asia/Shanghai";
 const DEBUG = process.env.DEBUG === "1";
 const NEWS_CONTENT_MAX_CHARS = 120;
-const MID_MAX_CHANGE_PCT = 0.04; // 中线：更稳健，排除过度拉升（4%+）
-const MID_MAX_VOL = 0.03; // 中线：最大波动
 const NEW_STOCK_DAYS = 180; // 次新股排除窗口（天）
-const INTRADAY_MIN_MOVE = 0.04; // 日内：高波动
-const SHORT_MIN_RISE = 0.02; // 短线最小涨幅
-const SHORT_MAX_RISE = 0.06; // 短线最大涨幅
-const SWING_MIN_RISE = 0.0; // 波段最小涨幅
-const SWING_MAX_RISE = 0.03; // 波段最大涨幅
-const SWING_MAX_VOL = 0.05; // 波段最大波动
 
 // =====================
 // 获取A股列表（简化版）
@@ -233,63 +225,6 @@ function truncate(text, max) {
     if (!text) return "";
     const t = String(text).trim();
     return t.length > max ? t.slice(0, max - 1) + "…" : t;
-}
-
-// =====================
-// 打分逻辑
-// =====================
-function computeFeatures(stock) {
-    const gap = stock.prevClose > 0 ? (stock.price - stock.prevClose) / stock.prevClose : 0;
-    const changePct = (stock.changePct || 0) / 100;
-    const volume = stock.volume || 0;
-    const volumeScore = Math.log10(volume + 1); // 粗略流动性
-    const volatility = Math.abs(changePct);
-    const trendUp = stock.price > stock.prevClose;
-    return { gap, changePct, volume, volumeScore, volatility, trendUp };
-}
-
-function scoreByStyle(style, features, news, announcements) {
-    const hasCatalyst = (news && news.length > 0) || (announcements && announcements.length > 0);
-    let score = 0;
-
-    if (style === "intraday") {
-        if (features.volatility < INTRADAY_MIN_MOVE) {
-            return null;
-        }
-        // 日内：波动 + 量能 + 催化剂
-        score += Math.min(features.volatility * 120, 6);
-        score += Math.min(features.volumeScore, 4);
-        if (Math.abs(features.gap) >= GAP_THRESHOLD) score += 2;
-        if (hasCatalyst) score += 2;
-    } else if (style === "short") {
-        if (features.changePct < SHORT_MIN_RISE || features.changePct > SHORT_MAX_RISE) {
-            return null;
-        }
-        // 短线：动量 + 量能 + 催化剂
-        score += Math.min(Math.max(features.changePct, 0) * 120, 6);
-        score += Math.min(features.volumeScore, 3);
-        if (features.trendUp) score += 1;
-        if (hasCatalyst) score += 2;
-    } else if (style === "swing") {
-        if (features.volatility > SWING_MAX_VOL || features.changePct < SWING_MIN_RISE || features.changePct > SWING_MAX_RISE) {
-            return null;
-        }
-        // 波段：中等动量 + 量能
-        score += Math.min(Math.max(features.changePct, 0) * 80, 4);
-        score += Math.min(features.volumeScore, 3);
-        if (hasCatalyst) score += 1;
-    } else if (style === "mid") {
-        // 中线：偏稳健，惩罚过大波动
-        if (features.changePct > MID_MAX_CHANGE_PCT || features.volatility > MID_MAX_VOL) {
-            return null; // 直接剔除
-        }
-        score += Math.min(Math.max(features.changePct, 0) * 30, 2.0);
-        score += Math.min(features.volumeScore, 3.0);
-        if (hasCatalyst) score += 1;
-        if (features.changePct < -0.01) score -= 1.5;
-    }
-
-    return score;
 }
 
 // =====================
