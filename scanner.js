@@ -16,7 +16,7 @@ const PROXY_URL =
     process.env.http_proxy;
 
 const httpClient = (() => {
-    if (!PROXY_URL) return axios.create({ timeout: 10000 });
+    if (!PROXY_URL) return axios.create({ timeout: 20000 });
     const masked = PROXY_URL.replace(/\/\/.*@/, "//****@");
     console.log(`🧭 使用代理: ${masked}`);
     const agent = new HttpsProxyAgent(PROXY_URL);
@@ -24,7 +24,7 @@ const httpClient = (() => {
         httpAgent: agent,
         httpsAgent: agent,
         proxy: false,
-        timeout: 10000
+        timeout: 20000
     });
 })();
 
@@ -46,30 +46,43 @@ const MID_MIN_VOL_RATIO = 1.3;
 // 获取A股列表（简化版）
 // =====================
 async function getStocks() {
-    const params = {
-        pn: 1,
-        pz: 200,
-        po: 1,
-        np: 1,
-        fltt: 2,
-        invt: 2,
-        fid: "f3",
-        // 沪深A股
-        fs: "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-        // 代码/名称/最新价/涨跌幅/涨跌额/成交量/昨收/上市日期
-        fields: "f12,f14,f2,f3,f4,f5,f18,f26",
-        _: Date.now()
+    const fetchList = async pz => {
+        const params = {
+            pn: 1,
+            pz,
+            po: 1,
+            np: 1,
+            fltt: 2,
+            invt: 2,
+            fid: "f3",
+            // 沪深A股
+            fs: "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+            // 代码/名称/最新价/涨跌幅/涨跌额/成交量/昨收/上市日期
+            fields: "f12,f14,f2,f3,f4,f5,f18,f26",
+            _: Date.now()
+        };
+
+        const res = await requestWithRetry(
+            () =>
+                httpClient.get(EM_BASE_URL, {
+                    params,
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Referer": "https://quote.eastmoney.com/"
+                    }
+                }),
+            5
+        );
+        return res;
     };
 
-    const res = await requestWithRetry(() =>
-        httpClient.get(EM_BASE_URL, {
-            params,
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://quote.eastmoney.com/"
-            }
-        })
-    );
+    let res;
+    try {
+        res = await fetchList(200);
+    } catch (e) {
+        console.log("⚠️ 拉取股票池超时，尝试降低数量重试...");
+        res = await fetchList(100);
+    }
     const diff = (res.data && res.data.data && res.data.data.diff) || [];
 
     const list = diff.map(d => ({
