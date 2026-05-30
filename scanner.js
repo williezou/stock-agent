@@ -429,8 +429,8 @@ async function runScanner() {
     try {
         const [boardList, riseStocks, declineStocks] = await Promise.all([
             longhuService.getLonghiBoardList(),
-            longhuService.getContinuousRiseStocks(),
-            longhuService.getContinuousDeclineStocks()
+            longhuService.getContinuousRiseStocks(stocks),
+            longhuService.getContinuousDeclineStocks(stocks)
         ]);
         longhiData = {
             boardList,
@@ -438,8 +438,8 @@ async function runScanner() {
             declineStocks
         };
         console.log(`\n🎯 龙虎榜上榜个股: ${boardList.length}`);
-        console.log(`\n📈 连续上涨个股: ${riseStocks.length}`);
-        console.log(`\n📉 连续下跌个股: ${declineStocks.length}`);
+        console.log(`\n📈 涨停个股: ${riseStocks.length}`);
+        console.log(`\n📉 跌停个股: ${declineStocks.length}`);
     } catch (e) {
         console.log("⚠️ 龙虎榜数据获取失败:", formatError(e) || e);
     }

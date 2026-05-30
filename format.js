@@ -90,24 +90,24 @@ function formatTelegramMessage({ resultsByStyle, now, newsService, longhiData = 
         longhiSections.push(boardSection);
     }
 
-    // 连续上涨个股
+    // 涨停个股
     if (longhiData.riseStocks && longhiData.riseStocks.length > 0) {
         const riseLines = longhiData.riseStocks.slice(0, 10).map((item, i) => {
-            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 涨幅:${(item.changePct).toFixed(2)}% | 连涨${item.consecutiveDays}天`;
+            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 涨幅:${(item.changePct).toFixed(2)}%`;
         });
-        const riseSection = 
-            `<b>📈 连续上涨 (${longhiData.riseStocks.length})</b>\n` +
+        const riseSection =
+            `<b>📈 涨停 (${longhiData.riseStocks.length})</b>\n` +
             (riseLines.length ? riseLines.join("\n") : "无数据");
         longhiSections.push(riseSection);
     }
 
-    // 连续下跌个股
+    // 跌停个股
     if (longhiData.declineStocks && longhiData.declineStocks.length > 0) {
         const declineLines = longhiData.declineStocks.slice(0, 10).map((item, i) => {
-            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 跌幅:${(item.changePct).toFixed(2)}% | 连跌${item.consecutiveDays}天`;
+            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 跌幅:${(item.changePct).toFixed(2)}%`;
         });
-        const declineSection = 
-            `<b>📉 连续下跌 (${longhiData.declineStocks.length})</b>\n` +
+        const declineSection =
+            `<b>📉 跌停 (${longhiData.declineStocks.length})</b>\n` +
             (declineLines.length ? declineLines.join("\n") : "无数据");
         longhiSections.push(declineSection);
     }
