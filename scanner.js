@@ -3,6 +3,7 @@ const axios = require("axios");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const { sendTelegram } = require("./telegram");
 const { createNewsService } = require("./news");
+const { createLonghuService } = require("./longhu");
 const { computeFeatures, scoreByStyle, scoreByStyleRelaxed } = require("./scoring");
 const { applyStockFilters } = require("./filters");
 const { isTradingDay, nowChinaString, chinaDateString } = require("./calendar");
@@ -165,6 +166,7 @@ const newsService = createNewsService({
     formatError
 });
 const marketService = createMarketService({ httpClient, requestWithRetry });
+const longhuService = createLonghuService({ httpClient, requestWithRetry, DEBUG });
 
 // =====================
 // 主流程
@@ -420,8 +422,30 @@ async function runScanner() {
         resultsByStyle.mid = midWithBuy;
     }
 
+    // =====================
+    // 获取龙虎榜数据
+    // =====================
+    let longhiData = {};
+    try {
+        const [boardList, riseStocks, declineStocks] = await Promise.all([
+            longhuService.getLonghiBoardList(),
+            longhuService.getContinuousRiseStocks(),
+            longhuService.getContinuousDeclineStocks()
+        ]);
+        longhiData = {
+            boardList,
+            riseStocks,
+            declineStocks
+        };
+        console.log(`\n🎯 龙虎榜上榜个股: ${boardList.length}`);
+        console.log(`\n📈 连续上涨个股: ${riseStocks.length}`);
+        console.log(`\n📉 连续下跌个股: ${declineStocks.length}`);
+    } catch (e) {
+        console.log("⚠️ 龙虎榜数据获取失败:", formatError(e) || e);
+    }
+
     const now = nowChinaString();
-    const msg = formatTelegramMessage({ resultsByStyle, now, newsService });
+    const msg = formatTelegramMessage({ resultsByStyle, now, newsService, longhiData });
 
     try {
         await sendTelegram(msg);
@@ -429,7 +453,7 @@ async function runScanner() {
         console.log("⚠️ Telegram 发送失败:", formatError(e) || e);
     }
 
-    return resultsByStyle;
+    return { resultsByStyle, longhiData };
 }
 
 runScanner();
