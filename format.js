@@ -13,7 +13,7 @@ function truncate(text, max) {
     return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }
 
-function formatTelegramMessage({ resultsByStyle, now, newsService }) {
+function formatTelegramMessage({ resultsByStyle, now, newsService, longhiData = {} }) {
     const styles = ["intraday", "short", "swing", "mid"];
     const styleLabels = {
         intraday: "日内",
@@ -71,7 +71,52 @@ function formatTelegramMessage({ resultsByStyle, now, newsService }) {
         sections.push(block);
     }
 
-    return `<b>A股扫描</b>\n${now}\n\n${sections.join("\n\n")}`;
+    // =====================
+    // 龙虎榜数据格式化
+    // =====================
+    const longhiSections = [];
+
+    // 龙虎榜上榜个股
+    if (longhiData.boardList && longhiData.boardList.length > 0) {
+        const boardLines = longhiData.boardList.slice(0, 15).map((item, i) => {
+            const changeText = item.changePct >= 0 
+                ? `<code>+${(item.changePct).toFixed(2)}%</code>` 
+                : `<code>${(item.changePct).toFixed(2)}%</code>`;
+            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 涨跌:${changeText} | 换手:${(item.turnoverRate).toFixed(2)}% | ${item.boardType || ""}`;
+        });
+        const boardSection = 
+            `<b>🎯 龙虎榜上榜 (${longhiData.boardList.length})</b>\n` +
+            (boardLines.length ? boardLines.join("\n") : "无数据");
+        longhiSections.push(boardSection);
+    }
+
+    // 连续上涨个股
+    if (longhiData.riseStocks && longhiData.riseStocks.length > 0) {
+        const riseLines = longhiData.riseStocks.slice(0, 10).map((item, i) => {
+            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 涨幅:${(item.changePct).toFixed(2)}% | 连涨${item.consecutiveDays}天`;
+        });
+        const riseSection = 
+            `<b>📈 连续上涨 (${longhiData.riseStocks.length})</b>\n` +
+            (riseLines.length ? riseLines.join("\n") : "无数据");
+        longhiSections.push(riseSection);
+    }
+
+    // 连续下跌个股
+    if (longhiData.declineStocks && longhiData.declineStocks.length > 0) {
+        const declineLines = longhiData.declineStocks.slice(0, 10).map((item, i) => {
+            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 跌幅:${(item.changePct).toFixed(2)}% | 连跌${item.consecutiveDays}天`;
+        });
+        const declineSection = 
+            `<b>📉 连续下跌 (${longhiData.declineStocks.length})</b>\n` +
+            (declineLines.length ? declineLines.join("\n") : "无数据");
+        longhiSections.push(declineSection);
+    }
+
+    const longhiBlock = longhiSections.length > 0 
+        ? `\n\n${longhiSections.join("\n\n")}`
+        : "";
+
+    return `<b>A股扫描</b>\n${now}\n\n${sections.join("\n\n")}${longhiBlock}`;
 }
 
 module.exports = { formatTelegramMessage };
