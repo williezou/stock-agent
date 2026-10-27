@@ -59,10 +59,11 @@ test("只允许HTTP(S)新闻链接进入Telegram HTML", () => {
     assert.equal(safeHttpUrl("https://example.com/news?a=1&b=2"), "https://example.com/news?a=1&b=2");
 });
 
-test("图形化交付包含总览、两张有效PNG和简明图片说明", () => {
+test("图形化交付按每两只股票分页并生成有效PNG", () => {
     const metas = [
         { symbol: "600887", name: "伊利股份", exchangeCode: "600887.SH", quoteUrl: "https://example.com/yili" },
-        { symbol: "002380", name: "科远智慧", exchangeCode: "002380.SZ", quoteUrl: "https://example.com/keyuan" }
+        { symbol: "002380", name: "科远智慧", exchangeCode: "002380.SZ", quoteUrl: "https://example.com/keyuan" },
+        { symbol: "600519", name: "贵州茅台", exchangeCode: "600519.SH", quoteUrl: "https://example.com/maotai" }
     ];
     const reports = metas.map(meta => {
         const klines = rows("2026-10-27");
@@ -77,12 +78,17 @@ test("图形化交付包含总览、两张有效PNG和简明图片说明", () =>
         };
     });
     const delivery = formatDailyCloseDelivery({ reports, date: "2026-10-27" });
-    assert.match(delivery.overviewCaption, /A股每日收盘图览/);
-    assert.doesNotMatch(delivery.overviewCaption, /[▁▂▃▄▅▆▇█]/);
-    assert.equal(delivery.stocks.length, 2);
-    const overviewPng = generateOverviewChart(reports, "2026-10-27");
-    assert.deepEqual([...overviewPng.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-    assert.ok(overviewPng.length > 10000);
+    assert.equal(delivery.overviews.length, 2);
+    assert.equal(delivery.overviews[0].reports.length, 2);
+    assert.equal(delivery.overviews[1].reports.length, 1);
+    assert.equal(delivery.stocks.length, 3);
+    for (const item of delivery.overviews) {
+        assert.match(item.caption, /A股每日收盘图览/);
+        assert.doesNotMatch(item.caption, /[▁▂▃▄▅▆▇█]/);
+        const overviewPng = generateOverviewChart(item.reports, "2026-10-27");
+        assert.deepEqual([...overviewPng.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+        assert.ok(overviewPng.length > 5000);
+    }
     for (const item of delivery.stocks) {
         const png = generateStockChart(item.report);
         assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);

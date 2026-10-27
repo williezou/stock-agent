@@ -7,25 +7,10 @@ const { generateOverviewChart, generateStockChart } = require("./daily-chart");
 const { formatDailyCloseDelivery } = require("./daily-format");
 const { createMarketService } = require("./market");
 const { createNewsService } = require("./news");
+const { DEFAULT_TARGETS } = require("./stocks");
 const { sendTelegramPhoto } = require("./telegram");
 const { analyzeKlines, buildTradePlan } = require("./technical");
-
-const TARGETS = [
-    {
-        symbol: "600887",
-        name: "伊利股份",
-        exchangeCode: "600887.SH",
-        quoteUrl: "https://quote.eastmoney.com/sh600887.html",
-        keywords: ["三季报", "季报", "回购", "资产减值", "利润", "公告"]
-    },
-    {
-        symbol: "002380",
-        name: "科远智慧",
-        exchangeCode: "002380.SZ",
-        quoteUrl: "https://quote.eastmoney.com/sz002380.html",
-        keywords: ["工业AI", "人工智能", "机器人", "三季报", "季报", "订单", "公告"]
-    }
-];
+const { createWatchlistStore } = require("./watchlist-store");
 
 const PROXY_URL =
     process.env.HTTPS_PROXY ||
@@ -168,7 +153,20 @@ async function getContextItems(newsService, targets) {
     }, 2);
 }
 
-async function buildReports({ dryRun = false, now = new Date() } = {}) {
+async function loadTargets() {
+    if (!process.env.DATABASE_URL) return DEFAULT_TARGETS;
+    if (!process.env.TELEGRAM_CHAT_ID) throw new Error("使用数据库自选股时必须配置TELEGRAM_CHAT_ID");
+    const store = createWatchlistStore();
+    try {
+        await store.initialize();
+        await store.seed(process.env.TELEGRAM_CHAT_ID, DEFAULT_TARGETS);
+        return await store.list(process.env.TELEGRAM_CHAT_ID);
+    } finally {
+        await store.close();
+    }
+}
+
+async function buildReports({ dryRun = false, now = new Date(), targets } = {}) {
     const httpClient = createHttpClient();
     const marketService = createMarketService({ httpClient, requestWithRetry });
     const newsService = createNewsService({
@@ -180,12 +178,16 @@ async function buildReports({ dryRun = false, now = new Date() } = {}) {
         formatError
     });
 
-    const klineSets = await Promise.all(TARGETS.map(target => marketService.getDailyKline(target.symbol, 140)));
+    const activeTargets = targets || await loadTargets();
+    if (!activeTargets.length) {
+        return { skipped: true, reason: "自选股列表为空", date: null, reports: [] };
+    }
+    const klineSets = await Promise.all(activeTargets.map(target => marketService.getDailyKline(target.symbol, 140)));
     const selection = selectReportDate(klineSets, { dryRun, now });
     if (!selection.date) return { skipped: true, reason: selection.reason, date: null, reports: [] };
 
-    const contextItems = await getContextItems(newsService, TARGETS);
-    const reports = TARGETS.map((meta, index) => {
+    const contextItems = await getContextItems(newsService, activeTargets);
+    const reports = activeTargets.map((meta, index) => {
         const rows = klineSets[index].filter(item => item.date <= selection.date);
         const analysis = analyzeKlines(rows);
         if (analysis.latest.date !== selection.date) {
@@ -204,7 +206,7 @@ async function buildReports({ dryRun = false, now = new Date() } = {}) {
 }
 
 async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {}) {
-    console.log(`📈 开始生成伊利股份与科远智慧收盘分析${dryRun ? "（试运行）" : ""}...`);
+    console.log(`📈 开始生成每日自选股收盘分析${dryRun ? "（试运行）" : ""}...`);
     const result = await buildReports({ dryRun });
     if (result.skipped) {
         console.log(`🛑 本次不推送：${result.reason}`);
@@ -213,8 +215,10 @@ async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {
 
     const delivery = formatDailyCloseDelivery(result);
     if (dryRun) {
-        const overviewChart = generateOverviewChart(result.reports, result.date);
-        console.log(`\n===== Telegram 总览图（${overviewChart.length} bytes）=====\n${delivery.overviewCaption}`);
+        delivery.overviews.forEach((item, index) => {
+            const overviewChart = generateOverviewChart(item.reports, result.date);
+            console.log(`\n===== Telegram 总览图 ${index + 1}/${delivery.overviews.length}（${overviewChart.length} bytes）=====\n${item.caption}`);
+        });
         delivery.stocks.forEach((item, index) => {
             const chart = generateStockChart(item.report);
             console.log(`\n===== Telegram 图表 ${index + 1}/${delivery.stocks.length}（${chart.length} bytes）=====\n${item.caption}`);
@@ -225,16 +229,15 @@ async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
         throw new Error("缺少TELEGRAM_BOT_TOKEN或TELEGRAM_CHAT_ID，未发送任何消息");
     }
-    await sendTelegramPhoto(
-        generateOverviewChart(result.reports, result.date),
-        delivery.overviewCaption,
-        `overview-${result.date}.png`
-    );
+    for (const item of delivery.overviews) {
+        await sendTelegramPhoto(generateOverviewChart(item.reports, result.date), item.caption, item.filename);
+        await delay(350);
+    }
     for (const item of delivery.stocks) {
         await delay(350);
         await sendTelegramPhoto(generateStockChart(item.report), item.caption, item.filename);
     }
-    console.log(`✅ 已向Telegram发送1张总览图和${delivery.stocks.length}张${result.date}个股图表`);
+    console.log(`✅ 已向Telegram发送${delivery.overviews.length}张总览图和${delivery.stocks.length}张${result.date}个股图表`);
     return { ...result, delivery };
 }
 
@@ -246,9 +249,10 @@ if (require.main === module) {
 }
 
 module.exports = {
-    TARGETS,
+    DEFAULT_TARGETS,
     buildReports,
     commonLatestDate,
+    loadTargets,
     prioritize,
     runDailyClose,
     selectReportDate

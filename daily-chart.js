@@ -396,25 +396,27 @@ function drawOverviewCard(image, report, y) {
 }
 
 function generateOverviewChart(reports, date) {
-    if (!Array.isArray(reports) || reports.length !== 2) {
-        throw new Error("总览图需要两只股票的数据");
+    if (!Array.isArray(reports) || reports.length < 1 || reports.length > 2) {
+        throw new Error("每张总览图需要一至两只股票的数据");
     }
-    const image = new Raster(1080, 760, COLORS.background);
+    const footerY = reports.length === 1 ? 394 : 694;
+    const height = reports.length === 1 ? 462 : 760;
+    const image = new Raster(1080, height, COLORS.background);
     image.text("DAILY CLOSE OVERVIEW", 48, 26, 3, COLORS.text);
     image.text(date, 820, 32, 2, COLORS.muted);
     image.line(48, 68, 1032, 68, COLORS.grid, 2);
     drawOverviewCard(image, reports[0], 92);
-    drawOverviewCard(image, reports[1], 390);
-    image.fillRect(48, 694, 16, 5, COLORS.up);
-    image.text("UP", 74, 689, 2, COLORS.muted);
-    image.fillRect(126, 694, 16, 5, COLORS.down);
-    image.text("DOWN", 152, 689, 2, COLORS.muted);
-    image.fillRect(252, 694, 22, 4, COLORS.support);
-    image.text("SUPPORT", 284, 689, 2, COLORS.muted);
-    image.fillRect(452, 694, 22, 4, COLORS.resistance);
-    image.text("RESIST", 484, 689, 2, COLORS.muted);
-    image.text("3-6M TARGET 15%  MAX LOSS 8%", 680, 689, 2, COLORS.muted);
-    image.text("PUBLIC MARKET DATA  FOR RESEARCH ONLY", 48, 730, 2, COLORS.muted);
+    if (reports[1]) drawOverviewCard(image, reports[1], 390);
+    image.fillRect(48, footerY, 16, 5, COLORS.up);
+    image.text("UP", 74, footerY - 5, 2, COLORS.muted);
+    image.fillRect(126, footerY, 16, 5, COLORS.down);
+    image.text("DOWN", 152, footerY - 5, 2, COLORS.muted);
+    image.fillRect(252, footerY, 22, 4, COLORS.support);
+    image.text("SUPPORT", 284, footerY - 5, 2, COLORS.muted);
+    image.fillRect(452, footerY, 22, 4, COLORS.resistance);
+    image.text("RESIST", 484, footerY - 5, 2, COLORS.muted);
+    image.text("3-6M TARGET 15%  MAX LOSS 8%", 680, footerY - 5, 2, COLORS.muted);
+    image.text("PUBLIC MARKET DATA  FOR RESEARCH ONLY", 48, footerY + 36, 2, COLORS.muted);
     return encodePng(image);
 }
 

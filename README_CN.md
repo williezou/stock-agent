@@ -1,16 +1,17 @@
 # stock-agent（中文版）
 
-基于东财数据的 A 股扫描器，支持四类策略（日内 / 短线 / 波段 / 中线），并可通过 Telegram 推送结果。项目还包含“伊利股份 + 科远智慧”每日收盘分析任务。
+基于东财数据的 A 股扫描器，支持四类策略（日内 / 短线 / 波段 / 中线），并可通过 Telegram 推送结果。项目还包含可通过 Telegram 菜单维护的每日自选股收盘分析任务。
 
 ## 功能
 - A 股股票池（过滤北交所/科创板/ST/次新）
 - 四类策略各自 Top5
 - 结合新闻 / 公告作为催化剂
 - Telegram 推送（带新闻来源与链接）
-- 每个 A 股交易日 15:30 生成伊利股份（600887）与科远智慧（002380）收盘报告
+- 每个 A 股交易日 15:30 生成自选股收盘报告；首次启动默认包含伊利股份（600887）与科远智慧（002380）
 - 报告包含 MA、MACD、RSI、KDJ、布林带、量价、支撑压力、公告/催化与条件性交易计划
 - Telegram 推送包含双股仪表盘，以及近 30 日 K 线、MA5/MA20、布林带、支撑压力和成交量图
 - 用当日完整日 K 线二次确认交易日，非交易日不推送，避免把盘中价当收盘价
+- Telegram 菜单支持添加、删除和查看每日追踪股票，最多 10 只
 
 ## 环境要求
 - Node.js 18+
@@ -25,6 +26,10 @@ npm install
 ```
 TELEGRAM_BOT_TOKEN=你的机器人token
 TELEGRAM_CHAT_ID=你的chat_id
+TELEGRAM_ALLOWED_USER_ID=允许操作菜单的Telegram用户ID # 可选，群聊时建议设置
+TELEGRAM_WEBHOOK_SECRET=至少16位随机字符串
+DATABASE_URL=PostgreSQL连接地址
+PUBLIC_BASE_URL=https://你的服务域名
 HTTP_PROXY=   # 可选
 HTTPS_PROXY=  # 可选
 NEWSNOW_BASE_URL= # 可选，默认 https://newsnow.busiyi.world
@@ -45,7 +50,37 @@ npm run daily-close:dry-run
 npm run daily-close
 ```
 
-GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北京时间 15:30 触发。仓库需要配置现有的 `TELEGRAM_BOT_TOKEN` 与 `TELEGRAM_CHAT_ID` Secrets；脚本会检查两只股票是否都有当天完整日 K，节假日不会发送。
+GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北京时间 15:30 触发。仓库需要配置 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 和 PostgreSQL 外部连接地址 `DATABASE_URL` Secrets；脚本会检查全部追踪股票是否都有当天完整日 K，节假日不会发送。
+
+## Telegram 菜单与 Render 部署
+
+项目根目录的 `render.yaml` 可创建 Node webhook Web Service 和 PostgreSQL。部署后设置以下 Render 环境变量：
+
+```
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
+TELEGRAM_ALLOWED_USER_ID # 可选
+TELEGRAM_WEBHOOK_SECRET
+```
+
+Web Service 使用 `npm run bot` 启动，健康检查路径为 `/healthz`。Render 会提供 `RENDER_EXTERNAL_URL`，服务启动后会自动注册 Telegram webhook 和命令，无需手动复制生成的 webhook 密钥。
+
+非 Render 环境可配置同样的变量和 `PUBLIC_BASE_URL`，手动执行：
+
+```
+npm run telegram:configure
+```
+
+该命令会注册 `/telegram/webhook`、设置 `/add`、`/remove`、`/list` 等命令，并向指定会话发送操作菜单。
+
+菜单操作：
+
+- `➕ 添加股票` 或 `/add 600519`
+- `➖ 删除股票` 或 `/remove 600519`
+- `📋 追踪列表` 或 `/list`
+- `/cancel` 取消当前输入
+
+Render 免费 Web Service 会在空闲后休眠，免费 PostgreSQL 也只适合测试；长期稳定使用应选择持久化且不休眠的方案。
 
 ## 测试
 ```

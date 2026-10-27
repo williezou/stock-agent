@@ -92,8 +92,17 @@ function formatOverviewCaption(reports, date) {
 }
 
 function formatDailyCloseDelivery({ reports, date }) {
+    const overviewPages = [];
+    for (let index = 0; index < reports.length; index += 2) {
+        const pageReports = reports.slice(index, index + 2);
+        overviewPages.push({
+            caption: formatOverviewCaption(pageReports, date),
+            filename: `overview-${date}-${overviewPages.length + 1}.png`,
+            reports: pageReports
+        });
+    }
     return {
-        overviewCaption: formatOverviewCaption(reports, date),
+        overviews: overviewPages,
         stocks: reports.map(report => ({
             caption: formatStockCaption(report, date),
             filename: `${report.meta.symbol}-${date}.png`,

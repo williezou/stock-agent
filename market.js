@@ -1,4 +1,5 @@
 const KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get";
+const QUOTE_URL = "https://push2.eastmoney.com/api/qt/stock/get";
 
 function toSecId(symbol) {
     const s = String(symbol || "");
@@ -61,7 +62,26 @@ function createMarketService({ httpClient, requestWithRetry }) {
         return parseKlines(res.data || {});
     }
 
-    return { getDailyKline };
+    async function getStockProfile(symbol) {
+        const secid = toSecId(symbol);
+        const res = await requestWithRetry(() =>
+            httpClient.get(QUOTE_URL, {
+                params: {
+                    secid,
+                    fields: "f57,f58"
+                },
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://quote.eastmoney.com/"
+                }
+            })
+        );
+        const data = res.data && res.data.data;
+        if (!data || !data.f57 || !data.f58) throw new Error(`无法识别股票代码${symbol}`);
+        return { symbol: String(data.f57), name: String(data.f58) };
+    }
+
+    return { getDailyKline, getStockProfile };
 }
 
-module.exports = { createMarketService };
+module.exports = { createMarketService, toSecId };

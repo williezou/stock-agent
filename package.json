@@ -4,8 +4,10 @@
   "main": "index.js",
   "scripts": {
     "scan": "node scanner.js",
+    "bot": "node bot-server.js",
     "daily-close": "node daily-close.js",
     "daily-close:dry-run": "node daily-close.js --dry-run",
+    "telegram:configure": "node scripts/configure-telegram.js",
     "test": "node --test test/*.test.js"
   },
   "keywords": [],
@@ -13,8 +15,9 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "axios": "^1.13.6",
+    "axios": "^1.20.0",
     "dotenv": "^17.3.1",
-    "https-proxy-agent": "^7.0.6"
+    "https-proxy-agent": "^7.0.6",
+    "pg": "^8.23.1"
   }
 }
