@@ -1,5 +1,7 @@
 const { PHOTO_CAPTION_LIMIT } = require("../constants");
-const { escapeHtml, linkLine, money, number, safeHttpUrl, shortText, signed } = require("./format");
+const { visibleLength } = require("../lib/telegram-text");
+const { escapeHtml, linkLine, money, number, shortText, signed } = require("./format");
+const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
 // 每日收盘报告的展示：总览图说明（每页两只股票）与个股图说明
 const OVERVIEW_PAGE_SIZE = 2;
@@ -20,12 +22,9 @@ function formatStockCaption(report, date) {
         ? `📰 ${escapeHtml(shortText(catalyst.title))}`
         : catalystLine;
     const focus = STOCK_FOCUS[meta.symbol] || "关注量能能否延续与板块情绪变化";
-    const quoteUrl = safeHttpUrl(meta.quoteUrl);
-    const sourceLine = quoteUrl
-        ? `🔗 <a href="${escapeHtml(quoteUrl)}">东方财富行情</a>`
-        : "🔗 行情来源：东方财富公开接口";
+    const sourceLine = `🔗 ${STOCK_LINK_LEGEND}`;
     const lines = [
-        `<b>${escapeHtml(meta.name)} ${meta.exchangeCode}｜${escapeHtml(date)}</b>`,
+        `${StockLink.of(meta).html({ bold: true, code: false })} <code>${escapeHtml(meta.exchangeCode)}</code>｜${escapeHtml(date)}`,
         `💰 收 ${number(latest.close)}元 ${signed(latest.changePct)}｜开/高/低 ${number(latest.open)}/${number(latest.high)}/${number(latest.low)}`,
         `📊 成交额 ${money(latest.amount)}｜换手 ${number(latest.turnover)}%｜5日量比 ${number(analysis.volumeRatio)}x`,
         `🟥涨K　🟩跌K　🟨MA5　🟦MA20　🟢支撑　🔴压力`,
@@ -41,16 +40,17 @@ function formatStockCaption(report, date) {
     ];
     // 超长链接会撑爆1024字符限制：依次降级为纯文本标题、去掉行情链接，而不是让整次推送失败
     let caption = lines.join("\n");
-    if (caption.length > PHOTO_CAPTION_LIMIT) caption = [...lines.slice(0, -2), plainCatalystLine, sourceLine].join("\n");
-    if (caption.length > PHOTO_CAPTION_LIMIT) caption = [...lines.slice(0, -2), plainCatalystLine].join("\n");
-    if (caption.length > PHOTO_CAPTION_LIMIT) throw new Error("Telegram图片说明超过1024字符限制");
+    // 按Telegram的口径计算可见文字长度（链接地址不计），正常情况下链接都能保留
+    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) caption = [...lines.slice(0, -2), plainCatalystLine, sourceLine].join("\n");
+    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) caption = [...lines.slice(0, -2), plainCatalystLine].join("\n");
+    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) throw new Error("Telegram图片说明超过1024字符限制");
     return caption;
 }
 
 function formatOverviewRow(report) {
     const { meta, analysis, plan } = report;
     const latest = analysis.latest;
-    return `<b>${escapeHtml(meta.name)}</b>　${number(latest.close)}元 ${signed(latest.changePct)}　量比${number(analysis.volumeRatio)}x　<b>${plan.recommendation}</b>`;
+    return `${StockLink.of(meta).html({ bold: true, code: false })}　${number(latest.close)}元 ${signed(latest.changePct)}　量比${number(analysis.volumeRatio)}x　<b>${plan.recommendation}</b>`;
 }
 
 function formatOverviewCaption(reports, date) {

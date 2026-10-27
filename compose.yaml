@@ -1,7 +1,12 @@
 name: stock-agent
 
 x-app: &app
-  build: .
+  build:
+    context: .
+    # 构建阶段（apt安装中文字体、npm ci）同样经宿主机代理访问外网
+    args:
+      http_proxy: ${DOCKER_PROXY_URL:-http://host.docker.internal:6152}
+      https_proxy: ${DOCKER_PROXY_URL:-http://host.docker.internal:6152}
   restart: unless-stopped
   init: true
   env_file:

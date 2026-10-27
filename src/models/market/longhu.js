@@ -52,6 +52,12 @@ function createLonghuService({ httpClient, requestWithRetry, boardSources }) {
         return sortByNetAmount(board);
     }
 
+    // 某只股票当日的买卖席位明细（仅同花顺提供，按用户点击查询）；未上榜或未发布时返回null
+    async function getSeatDetails(dateStr, symbol) {
+        if (typeof primary.getSeatDetails !== "function") throw new Error(`${primary.name}不支持查询龙虎榜席位`);
+        return primary.getSeatDetails(dateStr, symbol);
+    }
+
     /**
      * 从行情数据筛选涨停个股
      */
@@ -118,6 +124,7 @@ function createLonghuService({ httpClient, requestWithRetry, boardSources }) {
 
     return {
         getBoardByDate,
+        getSeatDetails,
         getContinuousRiseStocks,
         getContinuousDeclineStocks
     };

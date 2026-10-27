@@ -1,4 +1,4 @@
-const { escapeHtml } = require("./format");
+const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
 // 机器人的全部回复文案、Menu命令与键盘布局
 
@@ -43,6 +43,8 @@ const MESSAGES = {
     invalidSymbol: "股票代码无效。",
     unauthorizedCallback: "无权操作此机器人",
     operationFailed: "❌ 操作失败，请稍后重试。",
+    seatPending: "正在生成席位表格，请稍候…",
+    seatRecentlySent: "席位已发送，请查看上方消息",
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
@@ -59,13 +61,13 @@ function addPromptMarkup() {
 
 function watchlistText(targets, maxStocks) {
     const lines = targets.map((target, index) =>
-        `${index + 1}. <code>${target.symbol}</code> ${escapeHtml(target.name)}`
+        `${index + 1}. ${StockLink.of(target).html()}`
     );
-    return `<b>每日追踪列表（${targets.length}/${maxStocks}）</b>\n${lines.join("\n")}`;
+    return `<b>每日追踪列表（${targets.length}/${maxStocks}）</b>\n${lines.join("\n")}\n<i>${STOCK_LINK_LEGEND}</i>`;
 }
 
 function alreadyTrackedText(symbol, name) {
-    return `<code>${symbol}</code> ${escapeHtml(name)} 已在追踪列表中。`;
+    return `${new StockLink(symbol, name).html()} 已在追踪列表中。`;
 }
 
 function watchlistFullText(maxStocks) {
@@ -73,11 +75,12 @@ function watchlistFullText(maxStocks) {
 }
 
 function addedText(symbol, name) {
-    return `✅ 已添加 <code>${symbol}</code> ${escapeHtml(name)}，下个交易日将纳入收盘分析。`;
+    return `✅ 已添加 ${new StockLink(symbol, name).html()}，下个交易日将纳入收盘分析。`;
 }
 
 function removedText(symbol, removed) {
-    return removed ? `✅ 已停止追踪 <code>${symbol}</code>。` : `未找到 <code>${symbol}</code>。`;
+    const stock = new StockLink(symbol).html();
+    return removed ? `✅ 已停止追踪 ${stock}。` : `未找到 ${stock}。`;
 }
 
 function longhuToggledText(enabled) {
@@ -96,7 +99,7 @@ function removeChoicesMarkup(targets) {
 }
 
 function confirmRemoveText(symbol, name) {
-    return `确认删除 <code>${symbol}</code> ${escapeHtml(name)}？`;
+    return `确认删除 ${new StockLink(symbol, name).html()}？`;
 }
 
 function confirmRemoveMarkup(symbol) {

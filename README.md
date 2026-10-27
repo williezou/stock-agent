@@ -8,7 +8,8 @@ A-share stock scanner with multi-style rankings, Telegram notifications, and a m
 - News + announcement signals
 - Telegram notification with clickable links
 - Weekday 15:30 Asia/Shanghai close reports for a dynamic watchlist, initially seeded with Yili and Sciyon Wisdom
-- Dragon-Tiger list (龙虎榜) pushed separately once the exchanges finish publishing it in the evening (checked 17:30-20:30); toggle with `/longhu`
+- Dragon-Tiger list (龙虎榜) pushed separately once the exchanges finish publishing it in the evening (checked 17:30-20:30): a Chinese chart of the top 10 net buyers / top 5 net sellers, with stock-name buttons below it that reply with that stock's broker-seat table; toggle with `/longhu`
+- Stock names in pushes are followed by 🔴 🌸 icons linking to the Eastmoney / Tonghuashun mobile quote pages (which can open the apps)
 - MA/MACD/RSI/KDJ/Bollinger, volume-price, support/resistance, catalysts, and conditional trade plans
 - Telegram delivery includes a two-stock dashboard plus 30-day candlestick/volume charts with MA5/MA20, Bollinger bands, and support/resistance overlays
 - Final daily-bar validation so holidays and incomplete intraday quotes are not pushed as closes
@@ -48,7 +49,7 @@ src/lib/           HTTP client/proxy, retry, concurrency pool, rate limiter
 src/gateways/      Telegram Bot API client
 src/models/        data: Postgres repositories, stock codes, market data (Eastmoney → Tonghuashun → Tencent), news, Dragon-Tiger list, trading calendar
 src/services/      business logic: technical analysis, screening, daily report, scan, report delivery, bot setup
-src/views/         presentation: Telegram message text, bot replies, PNG charts
+src/views/         presentation: Telegram message text, bot replies, stock-name links (stock-link.js: 🔴 Eastmoney 🌸 Tonghuashun), PNG charts (Chinese charts use @napi-rs/canvas)
 src/controllers/   input handling: bot commands, webhook HTTP, daily delivery scheduler
 test/              mirrors src/
 ```
@@ -82,9 +83,9 @@ docker compose up -d --build
 docker compose run --rm bot npm run bot:menu
 ```
 
-Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The GitHub Actions workflow remains available for manual runs but no longer schedules duplicate reports.
+Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The image build also sends `npm ci` through that proxy (keep it running while building), installs a Chinese font (WenQuanYi Micro Hei) for the Dragon-Tiger charts, and fetches apt packages directly from the USTC mirror (override with `--build-arg APT_MIRROR=...`). Close reports and the Dragon-Tiger list are scheduled locally; the A-share scan is scheduled on GitHub Actions, so nothing is sent twice.
 
-Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist. `/longhu` (or `/longhu on|off`) toggles the evening Dragon-Tiger list push, which is on by default.
+Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist. `/longhu` (or `/longhu on|off`) toggles the evening Dragon-Tiger list push, which is on by default. Tapping a stock-name button under the Dragon-Tiger chart replies with that stock's broker-seat table (the same stock is not re-sent within 60 seconds).
 
 ### Render deployment (optional)
 

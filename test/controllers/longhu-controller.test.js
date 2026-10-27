@@ -12,8 +12,8 @@ const FULL_BOARD = [
     { symbol: "000001", name: "深股", changePct: -10, netAmount: -1e8, reason: "跌幅偏离" }
 ];
 
-function setup({ boards, subscribers = [{ chat_id: "100" }, { chat_id: "200" }], trading = { ok: true, verified: true }, sendError, fetchError } = {}) {
-    const calls = { sent: [], completed: [], failed: [], deactivated: [], alerts: [], tradingChecks: 0, fetches: 0 };
+function setup({ boards, subscribers = [{ chat_id: "100" }, { chat_id: "200" }], trading = { ok: true, verified: true }, sendError, fetchError, renderChart } = {}) {
+    const calls = { sent: [], photos: [], texts: [], completed: [], failed: [], deactivated: [], alerts: [], tradingChecks: 0, fetches: 0 };
     const store = {
         async listDueSubscribers(job, date, max, options) {
             assert.equal(job, "longhu");
@@ -38,9 +38,19 @@ function setup({ boards, subscribers = [{ chat_id: "100" }, { chat_id: "200" }],
             const error = sendError && sendError(chatId);
             if (error) throw error;
             calls.sent.push(chatId);
+            calls.texts.push(chatId);
         },
+        async sendPhoto(chatId, photo, caption, filename, options = {}) {
+            const error = sendError && sendError(chatId);
+            if (error) throw error;
+            calls.sent.push(chatId);
+            calls.photos.push({ chatId, caption, uploaded: Buffer.isBuffer(photo), photo, keyboard: options.replyMarkup });
+            return { photo: [{ file_id: "small" }, { file_id: "large-file-id" }] };
+        },
+        renderChart: renderChart || (() => Buffer.from("png")),
         adminChatId: "admin",
         alerted: new Set(),
+        botUsername: "stock_test_bot",
         state: { date: "", lastSlot: null, trading: null, counts: [] }
     };
     return { calls, services, store };
@@ -141,4 +151,37 @@ test("最后时段取数失败时提醒管理员并把订阅者记为跳过", as
     await runLonghuTick(final.store, at("20:20"), final.services);
     assert.match(final.calls.alerts[0], /龙虎榜获取失败/);
     assert.deepEqual(final.calls.completed.map(c => c.status), ["skipped", "skipped"]);
+});
+
+test("推送图表（图片+概况说明），图表生成失败时退回文字版", async () => {
+    const chart = setup({ boards: [FULL_BOARD] });
+    const outcome = await runLonghuTick(chart.store, at("20:20"), chart.services);
+    assert.equal(outcome.format, "chart");
+    assert.deepEqual(chart.calls.photos.map(p => p.chatId), ["100", "200"]);
+    assert.match(chart.calls.photos[0].caption, /龙虎榜｜2026-10-27/);
+    assert.deepEqual(chart.calls.texts, []);
+
+    const fallback = setup({ boards: [FULL_BOARD], renderChart: () => { throw new Error("未找到可用的中文字体"); } });
+    const fallbackOutcome = await runLonghuTick(fallback.store, at("20:20"), fallback.services);
+    assert.equal(fallbackOutcome.format, "text");
+    assert.deepEqual(fallback.calls.texts, ["100", "200"]);
+    assert.deepEqual(fallback.calls.photos, []);
+});
+
+test("图表只上传一次，后续订阅者复用Telegram返回的file_id", async () => {
+    const { calls, services, store } = setup({ boards: [FULL_BOARD], subscribers: [{ chat_id: "100" }, { chat_id: "200" }, { chat_id: "300" }] });
+    await runLonghuTick(store, at("20:20"), services);
+    assert.deepEqual(calls.photos.map(p => p.uploaded), [true, false, false]);
+    assert.deepEqual(calls.photos.slice(1).map(p => p.photo), ["large-file-id", "large-file-id"]);
+});
+
+test("图片下方按钮只放股票名称（回调按钮），净买入在前、净卖出另起一行，说明只留概况", async () => {
+    const { calls, services, store } = setup({ boards: [FULL_BOARD] });
+    await runLonghuTick(store, at("20:20"), services);
+    assert.deepEqual(calls.photos[0].keyboard.inline_keyboard, [
+        [{ text: "沪股", callback_data: "lhb:600000:20261027" }],
+        [{ text: "深股", callback_data: "lhb:000001:20261027" }]
+    ]);
+    assert.doesNotMatch(calls.photos[0].caption, /<a /, "说明里不再堆叠链接");
+    assert.deepEqual(calls.photos[1].keyboard, calls.photos[0].keyboard, "复用file_id时按钮一并发送");
 });

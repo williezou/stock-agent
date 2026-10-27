@@ -1,6 +1,8 @@
 const { STYLE_LABELS, STYLE_ORDER, TELEGRAM_TEXT_LIMIT } = require("../constants");
+const { MAX_ENTITIES, entityCount, visibleLength } = require("../lib/telegram-text");
 const { formatOverviewRow, formatStockCaption } = require("./daily-report-view");
 const { escapeHtml, number, signed } = require("./format");
+const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
 // A股扫描的展示：结论文字、分类总览图说明、可操作标的个股图
 // 图表字体仅含部分ASCII字母（无J/Q），标题需避开这些字符
@@ -57,7 +59,7 @@ function adviceLines(picksByStyle, longhiData, withReasons = true) {
     actionable.forEach((report, index) => {
         const { meta, plan } = report;
         lines.push(
-            `${index + 1}. <code>${meta.symbol}</code> ${escapeHtml(meta.name)}［${STYLE_LABELS[report.style]}］<b>${plan.recommendation}</b>`,
+            `${index + 1}. ${StockLink.of(meta).html()}［${STYLE_LABELS[report.style]}］<b>${plan.recommendation}</b>`,
             `　回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}｜止损 ${number(plan.stop)}｜目标 ${number(plan.target)}｜盈亏比 ${number(plan.rewardRisk)}:1`,
             ...(withReasons ? [`　${escapeHtml(plan.reason)}`] : [])
         );
@@ -69,7 +71,7 @@ function adviceLines(picksByStyle, longhiData, withReasons = true) {
 
 function pickLine(pick, index) {
     const { item, report } = pick;
-    const head = `${index + 1}. <code>${item.symbol}</code> ${escapeHtml(item.name)}`;
+    const head = `${index + 1}. ${StockLink.of(item).html()}`;
     if (!report) return `${head} ${item.gap}｜K线数据不足，未生成建议`;
     const { analysis, plan } = report;
     const heat = plan.overheated ? "｜⚠️偏热" : "";
@@ -79,7 +81,8 @@ function pickLine(pick, index) {
 function marketListLine(title, items, pickedSymbols, limit) {
     const rest = (items || []).filter(item => !pickedSymbols.has(item.symbol));
     if (!rest.length) return null;
-    const names = rest.slice(0, limit).map(item => `${escapeHtml(item.name)}${signed(item.changePct)}`);
+    // 热点只是行情概览，名称用纯文本，避免每只股票两个链接撑满Telegram的格式实体上限
+    const names = rest.slice(0, limit).map(item => `${StockLink.of(item).text()}${signed(item.changePct)}`);
     const more = rest.length > limit ? ` 等${rest.length}只` : "";
     return `${title}：${names.join("、")}${more}`;
 }
@@ -103,19 +106,19 @@ function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
         adviceLines(picksByStyle, longhiData, withReasons).join("\n"),
         styleLines.join("\n"),
         ...(withMarket && marketLines.length ? [["<b>🔥 市场热点（不含已入选）</b>", ...marketLines].join("\n")] : []),
-        "<i>以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</i>"
+        `<i>${STOCK_LINK_LEGEND}。以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</i>`
     ].join("\n\n");
 
-    // 超长时按整段舍弃次要内容，避免截断HTML标签导致Telegram解析失败
+    // 超长或格式实体过多时按整段舍弃次要内容，避免截断HTML标签导致Telegram解析失败
     for (const options of [
         { withReasons: true, withMarket: true },
         { withReasons: true, withMarket: false },
         { withReasons: false, withMarket: false }
     ]) {
         const text = build(options);
-        if (text.length <= TELEGRAM_TEXT_LIMIT) return text;
+        if (visibleLength(text) <= TELEGRAM_TEXT_LIMIT && entityCount(text) <= MAX_ENTITIES) return text;
     }
-    throw new Error("扫描结论超过Telegram 4096字符限制");
+    throw new Error("扫描结论超过Telegram 4096字符或100个格式实体的限制");
 }
 
 function formatScanOverviewCaption(style, reports, date) {

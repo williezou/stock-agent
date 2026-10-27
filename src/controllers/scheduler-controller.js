@@ -5,7 +5,7 @@ const { alertAdmin, sentAlerts } = require("../services/admin-alert");
 const { buildReports } = require("../services/daily-report");
 const { deliverDailyClose } = require("../services/report-delivery");
 const { sendAndRecord } = require("../services/tracked-delivery");
-const { escapeHtml } = require("../views/format");
+const { StockLink } = require("../views/stock-link");
 
 // 每日收盘调度控制器：工作日北京时间15:30-18:00轮询，为每个订阅者领取并投递当日报告
 const JOB_NAME = "daily-close";
@@ -164,7 +164,7 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
         if (outcome !== "delivered") return outcome;
         if (missing.length) {
             // The report is already delivered; a failed notice must not trigger a full resend.
-            const names = missing.map(target => `<code>${target.symbol}</code> ${escapeHtml(target.name)}`);
+            const names = missing.map(target => StockLink.of(target).html());
             await notify(chatId, `⚠️ 以下股票今日没有完整日K，本次未包含：\n${names.join("\n")}`)
                 .catch(error => console.error(`⚠️ 向${chatId}发送缺失提示失败：${error.message}`));
         }

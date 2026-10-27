@@ -8,7 +8,8 @@
 - 结合新闻 / 公告作为催化剂
 - Telegram 推送（带新闻来源与链接）
 - 每个 A 股交易日 15:30 生成自选股收盘报告；首次启动默认包含伊利股份（600887）与科远智慧（002380）
-- 交易所收盘后傍晚发布龙虎榜，调度器在 17:30-20:30 检测到当日榜单发布完成后单独推送（净买入/净卖出排行），用户可用 `/longhu` 开关
+- 交易所收盘后傍晚发布龙虎榜，调度器在 17:30-20:30 检测到当日榜单发布完成后单独推送：一张中文图表（净买入前10/净卖出前5），图片下方是股票名称按钮，点击后机器人回复该股当日买卖席位表格；用户可用 `/longhu` 开关
+- 推送中的股票名称后带 🔴 🌸 图标，分别打开东方财富、同花顺手机版行情页（网页上可跳转App）
 - 报告包含 MA、MACD、RSI、KDJ、布林带、量价、支撑压力、公告/催化与条件性交易计划
 - Telegram 推送包含双股仪表盘，以及近 30 日 K 线、MA5/MA20、布林带、支撑压力和成交量图
 - 用当日完整日 K 线二次确认交易日，非交易日不推送，避免把盘中价当收盘价
@@ -46,7 +47,7 @@ src/lib/           HTTP客户端/代理、重试、并发池、限流
 src/gateways/      Telegram Bot API 客户端
 src/models/        M：数据库仓储、股票代码、行情数据（东方财富→同花顺→腾讯）、新闻、龙虎榜、交易日历
 src/services/      业务逻辑：技术分析、选股、每日收盘报告、A股扫描、报告推送、机器人配置
-src/views/         V：Telegram消息文案、机器人回复、PNG图表
+src/views/         V：Telegram消息文案、机器人回复、股票名称链接（stock-link.js：🔴 东方财富 🌸 同花顺）、PNG图表（中文图表基于 @napi-rs/canvas）
 src/controllers/   C：机器人命令、Webhook HTTP、每日投递调度
 test/              与 src/ 结构对应
 ```
@@ -100,7 +101,7 @@ docker compose down             # 保留数据库卷
 docker compose down --volumes   # 同时删除本地数据库数据
 ```
 
-如果宿主机通过代理访问 Telegram，默认会使用 `http://host.docker.internal:6152`；可通过 `.env` 中的 `DOCKER_PROXY_URL` 修改。定时任务由本机容器负责，GitHub Actions 工作流仅保留手动触发，避免重复推送。
+如果宿主机通过代理访问 Telegram，默认会使用 `http://host.docker.internal:6152`；可通过 `.env` 中的 `DOCKER_PROXY_URL` 修改。构建镜像时 `npm ci` 同样经该代理访问外网（构建前请确保代理已开启）；镜像会安装中文字体（文泉驿微米黑）用于龙虎榜图表，apt 默认使用中科大镜像直连，可通过 `docker compose build --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn` 更换。收盘报告与龙虎榜由本机容器定时推送，A股扫描由 GitHub Actions 定时执行，互不重复。
 
 ### Render 部署（可选）
 
@@ -132,6 +133,7 @@ npm run telegram:configure
 - `/list` 查看追踪列表
 - `/cancel` 取消当前输入
 - `/longhu` 开启/关闭龙虎榜推送（也可 `/longhu on`、`/longhu off`），默认开启
+- 龙虎榜推送图片下方点股票名称，查看该股当日买卖席位表格（同一只股票60秒内不重复发送）
 - `/stop` 暂停个人每日推送，`/start` 可恢复
 
 Render 免费 Web Service 会在空闲后休眠，免费 PostgreSQL 也只适合测试；长期稳定使用应选择持久化且不休眠的方案。

@@ -6,7 +6,8 @@ const { createLonghuService } = require("../models/market/longhu");
 const { getChinaClock, isTradingDay, isWeekdayWindow, minutesOfDay } = require("../models/market/trading-calendar");
 const { alertAdmin } = require("../services/admin-alert");
 const { sendAndRecord } = require("../services/tracked-delivery");
-const { formatLonghuMessage } = require("../views/longhu-view");
+const { generateLonghuChart } = require("../views/charts/longhu-chart");
+const { formatLonghuCaption, formatLonghuKeyboard, formatLonghuMessage } = require("../views/longhu-view");
 
 // 龙虎榜推送控制器：交易所在收盘后傍晚（约16:00-20:00）分批发布龙虎榜，且接口没有“发布完成”标记。
 // 工作日17:30-20:30按固定的10分钟时段检查（17:30、17:40……，不会因执行耗时漂移而错过最后时段）：
@@ -89,7 +90,37 @@ function withFinalRetry(send, final) {
     };
 }
 
-async function deliverToSubscribers(store, subscribers, { dateStr, text, notify, final }) {
+// 推送内容只生成一次，所有订阅者共用：优先发图表（图片+概况说明），图表生成失败时退回文字版，保证当天不漏推。
+// 图片只上传一次：首次发送成功后记下Telegram返回的 file_id，之后的订阅者直接引用
+// 机器人用户名只用于文字版后备里“📋 查看席位”的 t.me 深层链接；查询失败时链接退回电脑版详情页
+async function resolveBotUsername() {
+    try {
+        return (await telegram.getMe()).username || null;
+    } catch (error) {
+        console.error(`⚠️ 获取机器人用户名失败，龙虎榜链接改用电脑版详情页：${formatError(error)}`);
+        return null;
+    }
+}
+
+async function buildContent({ dateStr, board, getBotUsername, render, sendMessage, sendPhoto }) {
+    try {
+        const png = render({ date: dateStr, board });
+        const caption = formatLonghuCaption({ date: dateStr, board });
+        const replyMarkup = formatLonghuKeyboard({ date: dateStr, board });
+        let fileId = null;
+        const send = async chatId => {
+            const message = await sendPhoto(chatId, fileId || png, caption, `longhu-${dateStr}.png`, { replyMarkup });
+            fileId = fileId || telegram.largestPhotoFileId(message);
+        };
+        return { kind: "chart", send };
+    } catch (error) {
+        console.error(`⚠️ 龙虎榜图表生成失败，改发文字：${formatError(error)}`);
+        const text = formatLonghuMessage({ date: dateStr, board, botUsername: await getBotUsername() });
+        return { kind: "text", send: chatId => sendMessage(chatId, text) };
+    }
+}
+
+async function deliverToSubscribers(store, subscribers, { dateStr, send, final }) {
     const totals = { delivered: 0, failed: 0, deactivated: 0 };
     for (const subscriber of subscribers) {
         const chatId = subscriber.chat_id;
@@ -99,7 +130,7 @@ async function deliverToSubscribers(store, subscribers, { dateStr, text, notify,
                 jobName: JOB_NAME,
                 chatId,
                 runDate: dateStr,
-                send: withFinalRetry(() => notify(chatId, text), final),
+                send: withFinalRetry(() => send(chatId), final),
                 finalAttempt: final
             });
             totals[outcome]++;
@@ -168,12 +199,19 @@ async function runLonghuTick(store, now = new Date(), services = {}) {
         return { action: "skipped", reason: "龙虎榜未发布" };
     }
 
-    const text = formatLonghuMessage({ date: dateStr, board });
-    const totals = await deliverToSubscribers(store, subscribers, { dateStr, text, notify, final });
+    const content = await buildContent({
+        dateStr,
+        board,
+        getBotUsername: services.botUsername !== undefined ? async () => services.botUsername : resolveBotUsername,
+        render: services.renderChart || generateLonghuChart,
+        sendMessage: notify,
+        sendPhoto: services.sendPhoto || telegram.sendPhoto
+    });
+    const totals = await deliverToSubscribers(store, subscribers, { dateStr, send: content.send, final });
     if (final && totals.failed) {
         await alertAdmin(alertContext, { key: `${dateStr}:longhu-send`, text: `⚠️ 今日龙虎榜有${totals.failed}位用户推送失败，已无重试机会。` });
     }
-    return { action: "processed", count: board.length, recipients: subscribers.length, ...totals };
+    return { action: "processed", count: board.length, format: content.kind, recipients: subscribers.length, ...totals };
 }
 
 module.exports = { coversMainExchanges, isLonghuFinalWindow, isLonghuWindow, isStable, runLonghuTick };

@@ -104,17 +104,18 @@ test("每个分类一张总览图，个股图只发给可操作标的", () => {
     assert.deepEqual(delivery.stocks.map(s => s.report.meta.symbol), ["600001", "600003"]);
 });
 
-test("超长催化链接降级为纯文本标题而不是抛错", () => {
+test("超长链接地址不占图片说明长度，新闻链接得以保留", () => {
     const { formatStockCaption } = require("../../src/views/daily-report-view");
+    const { visibleLength } = require("../../src/lib/telegram-text");
     const longReport = report("600001", "short", "条件性试仓");
     longReport.analysis.macd = {};
     longReport.analysis.kdj = {};
     longReport.analysis.bollinger = {};
     longReport.news = [{ title: "重大合同公告", url: `https://example.com/a?${"x=1&".repeat(200)}` }];
     const caption = formatStockCaption(longReport, "2026-10-27");
-    assert.ok(caption.length <= 1024);
-    assert.match(caption, /📰 重大合同公告/);
-    assert.doesNotMatch(caption, /example\.com/);
+    assert.ok(caption.length > 1024, "含链接地址的原始长度超过1024");
+    assert.ok(visibleLength(caption) <= 1024, "可见文字在上限内");
+    assert.match(caption, /📰 <a href="https:\/\/example\.com\/a\?[^"]+">重大合同公告<\/a>/);
 });
 
 test("扫描结论超长时整段舍弃次要内容，不截断HTML标签", () => {
@@ -141,4 +142,27 @@ test("涨跌停榜单触顶时显示为下限", () => {
         longhiData: { riseStocks: [{ symbol: "1", name: "a", changePct: 10 }], declineStocks: [], riseCapped: true }
     });
     assert.match(text, /涨停≥1家／跌停0家/);
+});
+
+test("最坏情况下扫描结论的格式实体数不超过Telegram上限，热点名称为纯文本", () => {
+    const { entityCount, MAX_ENTITIES } = require("../../src/lib/telegram-text");
+    const styles = ["intraday", "short", "swing", "mid"];
+    const picksByStyle = Object.fromEntries(styles.map((style, s) => [
+        style,
+        [0, 1].map(i => ({ item: item(`60${s}00${i}`, 1), report: report(`60${s}00${i}`, style, i ? "等待企稳后试仓" : "条件性试仓") }))
+    ]));
+    const hot = Array.from({ length: 20 }, (_, i) => ({ symbol: String(300100 + i), name: `热门${i}`, changePct: 10 }));
+    const text = formatScanSummary({
+        now: "2026-10-27",
+        picksByStyle,
+        longhiData: { riseStocks: hot, declineStocks: hot.map(h => ({ ...h, symbol: `0${h.symbol.slice(1)}`, changePct: -10 })) }
+    });
+    assert.ok(entityCount(text) <= MAX_ENTITIES, `实体数 ${entityCount(text)}`);
+    assert.match(text, /📈 涨停：热门0\+10\.00%、/);
+    assert.doesNotMatch(text.split("市场热点")[1], /<a /, "热点名称不带链接");
+});
+
+test("格式实体计数只统计Telegram支持的标签", () => {
+    const { entityCount } = require("../../src/lib/telegram-text");
+    assert.equal(entityCount('<b>x</b> <a href="u">y</a> <code>1</code> <i>z</i> &lt;b&gt;'), 4);
 });

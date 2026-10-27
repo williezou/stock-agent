@@ -1,6 +1,7 @@
 const { config } = require("../config");
 const { PHOTO_CAPTION_LIMIT } = require("../constants");
 const { createHttpClient, requestWithRetry } = require("../lib/http");
+const { visibleLength } = require("../lib/telegram-text");
 
 let client;
 function getClient() {
@@ -39,10 +40,16 @@ function multipartField(boundary, name, value) {
     );
 }
 
-// 以multipart上传PNG，避免依赖额外的表单库
-async function sendPhoto(chatId, photo, caption = "", filename = "chart.png") {
-    if (!Buffer.isBuffer(photo)) throw new TypeError("photo必须是PNG Buffer");
-    if (caption.length > PHOTO_CAPTION_LIMIT) throw new Error("Telegram图片说明超过1024字符限制");
+// 发送图片并返回Telegram消息对象。photo为PNG Buffer时以multipart上传（避免依赖表单库）；
+// 为字符串时视为已上传图片的 file_id，直接引用而不重复上传
+// options.replyMarkup：附在图片下方的按钮
+async function sendPhoto(chatId, photo, caption = "", filename = "chart.png", options = {}) {
+    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) throw new Error("Telegram图片说明超过1024字符限制");
+    const replyMarkup = options.replyMarkup ? { reply_markup: options.replyMarkup } : {};
+    if (typeof photo === "string") {
+        return telegramRequest("sendPhoto", { chat_id: String(chatId), photo, caption, parse_mode: "HTML", ...replyMarkup });
+    }
+    if (!Buffer.isBuffer(photo)) throw new TypeError("photo必须是PNG Buffer或file_id");
     const url = methodUrl("sendPhoto");
     const safeFilename = String(filename).replace(/[^a-zA-Z0-9._-]/g, "_");
     const boundary = `----stock-agent-${Date.now().toString(16)}`;
@@ -50,6 +57,7 @@ async function sendPhoto(chatId, photo, caption = "", filename = "chart.png") {
         multipartField(boundary, "chat_id", String(chatId)),
         multipartField(boundary, "caption", caption),
         multipartField(boundary, "parse_mode", "HTML"),
+        ...(options.replyMarkup ? [multipartField(boundary, "reply_markup", JSON.stringify(options.replyMarkup))] : []),
         Buffer.from(
             `--${boundary}\r\n` +
             `Content-Disposition: form-data; name="photo"; filename="${safeFilename}"\r\n` +
@@ -58,13 +66,27 @@ async function sendPhoto(chatId, photo, caption = "", filename = "chart.png") {
         photo,
         Buffer.from(`\r\n--${boundary}--\r\n`)
     ]);
-    await requestWithRetry(() => getClient().post(url, body, {
+    const response = await requestWithRetry(() => getClient().post(url, body, {
         headers: {
             "Content-Type": `multipart/form-data; boundary=${boundary}`,
             "Content-Length": body.length
         },
         maxBodyLength: Infinity
     }), 3, 300);
+    return response.data && response.data.result;
+}
+
+// Telegram为同一图片生成多种尺寸，取最大尺寸的 file_id 供后续引用
+function largestPhotoFileId(message) {
+    const sizes = (message && message.photo) || [];
+    return sizes.length ? sizes[sizes.length - 1].file_id : null;
+}
+
+// 机器人自身信息（用户名用于生成 t.me 深层链接），进程内只查询一次
+let botProfile;
+async function getMe() {
+    if (!botProfile) botProfile = await telegramRequest("getMe");
+    return botProfile;
 }
 
 async function answerCallbackQuery(callbackQueryId, options = {}) {
@@ -82,7 +104,9 @@ function isBotBlockedError(error) {
 
 module.exports = {
     answerCallbackQuery,
+    getMe,
     isBotBlockedError,
+    largestPhotoFileId,
     sendMessage,
     sendPhoto,
     telegramRequest

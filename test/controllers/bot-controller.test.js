@@ -219,3 +219,147 @@ test("/longhu 切换龙虎榜推送，并支持 on/off 显式设置", async () =
     assert.match(sent.at(-1).text, /用法/);
     assert.equal((await store.getSubscriber(100)).longhu_enabled, true);
 });
+
+test("点击龙虎榜深层链接：订阅者收到席位明细，未订阅者不会被当作邀请码注册", async () => {
+    const queries = [];
+    const longhuService = {
+        async getSeatDetails(date, symbol) {
+            queries.push([date, symbol]);
+            return symbol === "002249"
+                ? { symbol, name: "大洋电机", changePct: 10, groups: [{ reason: "日涨幅偏离值达7%的证券", dealAmount: 1, buyTotal: 1, sellTotal: 1, netAmount: 1, buyers: [], sellers: [] }] }
+                : null;
+        }
+    };
+    const sent = [];
+    const store = createMemoryStore([], true);
+    const controller = createBotController({
+        store, marketService: {}, longhuService,
+        async sendMessage(chatId, text) { sent.push(text); },
+        async answerCallback() {},
+        inviteCode: "friends", adminChatId: "1"
+    });
+    await controller.handleUpdate(privateMessage("/start lhb_002249_20261027"));
+    assert.deepEqual(queries[0], ["2026-10-27", "002249"]);
+    assert.match(sent.at(-1), /大洋电机.*2026-10-27 龙虎榜/);
+
+    await controller.handleUpdate(privateMessage("/start lhb_600000_20261027"));
+    assert.match(sent.at(-1), /未查询到 <code>600000<\/code>/);
+
+    await controller.handleUpdate(privateMessage("/start lhb_002249_20261027", 555));
+    assert.match(sent.at(-1), /邀请码/);
+    assert.equal(await store.getSubscriber(555), null, "未注册用户不会因点击链接而被注册");
+});
+
+test("龙虎榜席位以表格图片发送，画图失败时退回文字", async () => {
+    const detail = { symbol: "002249", name: "大洋电机", changePct: 10, groups: [{ reason: "日涨幅偏离值达7%的证券", dealAmount: 1, buyTotal: 1, sellTotal: 1, netAmount: 1, buyers: [], sellers: [] }] };
+    function build(renderSeatChart) {
+        const sent = { photos: [], texts: [] };
+        const controller = createBotController({
+            store: createMemoryStore([], true),
+            marketService: {},
+            longhuService: { async getSeatDetails() { return detail; } },
+            async sendMessage(chatId, text) { sent.texts.push(text); },
+            async sendPhoto(chatId, png, caption, filename, options = {}) { sent.photos.push({ png, caption, keyboard: options.replyMarkup }); },
+            renderSeatChart,
+            async answerCallback() {},
+            adminChatId: "1"
+        });
+        return { controller, sent };
+    }
+    const ok = build(() => Buffer.from("png"));
+    await ok.controller.handleUpdate(privateMessage("/start lhb_002249_20261027"));
+    assert.equal(ok.sent.photos.length, 1);
+    assert.match(ok.sent.photos[0].caption, /大洋电机.*龙虎榜席位/);
+    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["🔴 东方财富", "🌸 同花顺", "💻 电脑版"]);
+    assert.deepEqual(ok.sent.texts, []);
+
+    const broken = build(() => { throw new Error("未找到可用的中文字体"); });
+    await broken.controller.handleUpdate(privateMessage("/start lhb_002249_20261027"));
+    assert.equal(broken.sent.photos.length, 0);
+    assert.match(broken.sent.texts[0], /大洋电机.*2026-10-27 龙虎榜/);
+});
+
+test("点击龙虎榜图片下方的股票名称按钮，回复该股席位表格", async () => {
+    const answered = [];
+    const photos = [];
+    const controller = createBotController({
+        store: createMemoryStore([], true),
+        marketService: {},
+        longhuService: { async getSeatDetails(date, symbol) { return { symbol, name: "大洋电机", changePct: 10, groups: [] }; } },
+        async sendMessage() {},
+        async sendPhoto(chatId, png, caption) { photos.push(caption); },
+        renderSeatChart: () => Buffer.from("png"),
+        async answerCallback(id) { answered.push(id); },
+        adminChatId: "1"
+    });
+    await controller.handleUpdate({
+        callback_query: { id: "cb", from: { id: 200 }, message: { chat: { id: 100, type: "private" } }, data: "lhb:002249:20261027" }
+    });
+    assert.deepEqual(answered, ["cb"]);
+    assert.match(photos[0], /大洋电机.*2026-10-27 龙虎榜席位/);
+});
+
+test("席位查询防重复点击：生成中与60秒内重复点击只弹提示，冷却后可再次查看", async () => {
+    let clock = 0;
+    let release;
+    const answered = [];
+    const photos = [];
+    const controller = createBotController({
+        store: createMemoryStore([], true),
+        marketService: {},
+        longhuService: {
+            async getSeatDetails(date, symbol) {
+                await new Promise(resolve => { release = resolve; });
+                return { symbol, name: "大洋电机", changePct: 10, groups: [] };
+            }
+        },
+        async sendMessage() {},
+        async sendPhoto(chatId, png, caption) { photos.push(caption); },
+        renderSeatChart: () => Buffer.from("png"),
+        async answerCallback(id, options = {}) { answered.push([id, options.text || ""]); },
+        adminChatId: "1",
+        now: () => clock
+    });
+    const tap = id => controller.handleUpdate({
+        callback_query: { id, from: { id: 200 }, message: { chat: { id: 100, type: "private" } }, data: "lhb:002249:20261027" }
+    });
+
+    const first = tap("cb1");
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(answered, [["cb1", ""]], "首次点击立即应答，不等生成完成");
+    await tap("cb2");
+    assert.deepEqual(answered[1], ["cb2", "正在生成席位表格，请稍候…"]);
+    release();
+    await first;
+    assert.equal(photos.length, 1);
+
+    clock += 30 * 1000;
+    await tap("cb3");
+    assert.deepEqual(answered[2], ["cb3", "席位已发送，请查看上方消息"]);
+    assert.equal(photos.length, 1, "冷却期内不重复发送");
+
+    clock += 31 * 1000;
+    const again = tap("cb4");
+    await new Promise(resolve => setImmediate(resolve));
+    release();
+    await again;
+    assert.equal(photos.length, 2, "冷却结束后可再次查看");
+});
+
+test("不同股票的席位互不影响", async () => {
+    const photos = [];
+    const controller = createBotController({
+        store: createMemoryStore([], true),
+        marketService: {},
+        longhuService: { async getSeatDetails(date, symbol) { return { symbol, name: symbol, changePct: 1, groups: [] }; } },
+        async sendMessage() {},
+        async sendPhoto(chatId, png, caption) { photos.push(caption); },
+        renderSeatChart: () => Buffer.from("png"),
+        async answerCallback() {},
+        adminChatId: "1"
+    });
+    for (const data of ["lhb:002249:20261027", "lhb:600000:20261027", "lhb:002249:20261027"]) {
+        await controller.handleUpdate({ callback_query: { id: data, from: { id: 200 }, message: { chat: { id: 100, type: "private" } }, data } });
+    }
+    assert.equal(photos.length, 2);
+});

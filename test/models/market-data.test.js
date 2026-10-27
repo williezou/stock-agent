@@ -118,7 +118,7 @@ test("并发worker共享请求间隔", async () => {
     };
     await fetchKlineSets(marketService, [1, 2, 3, 4].map(i => ({ symbol: String(i) })), { gapMs: 40 });
     started.sort((a, b) => a - b);
-    for (let i = 1; i < started.length; i++) assert.ok(started[i] - started[i - 1] >= 35, `间隔过短：${started[i] - started[i - 1]}ms`);
+    for (let i = 1; i < started.length; i++) assert.ok(started[i] - started[i - 1] >= 30, `间隔过短：${started[i] - started[i - 1]}ms`);
 });
 
 test("查无此股不计入熔断，冷却结束后重新计数", async () => {

@@ -2,8 +2,20 @@ const { config } = require("../config");
 const { formatError } = require("../lib/http");
 const { buildTarget, normalizeSymbol } = require("../models/stock");
 const view = require("../views/bot-view");
+const { generateSeatChart } = require("../views/charts/seat-chart");
+const {
+    formatSeatCaption,
+    formatSeatDetail,
+    formatSeatKeyboard,
+    formatSeatNotFound,
+    parseLonghuCallbackData,
+    parseLonghuStartPayload
+} = require("../views/longhu-view");
 
 const { LEGACY_BUTTONS, MESSAGES } = view;
+
+// 同一只股票的席位在此时间内不重复发送（防止连续点击刷屏）
+const SEAT_COOLDOWN_MS = 60 * 1000;
 
 // 解析 /command 参数；不是该命令时返回null，无参数时返回空字符串
 function commandArgument(text, command) {
@@ -19,15 +31,33 @@ function isCommand(text, ...commands) {
 function createBotController({
     store,
     marketService,
+    longhuService,
     sendMessage,
+    sendPhoto,
+    renderSeatChart = generateSeatChart,
     answerCallback,
     inviteCode = config.registration.inviteCode,
     openRegistration = config.registration.openRegistration,
     adminChatId = config.telegram.adminChatId,
     privateOnly = true,
     maxSubscribers = config.registration.maxSubscribers,
-    maxStocks = config.registration.maxStocksPerUser
+    maxStocks = config.registration.maxStocksPerUser,
+    seatCooldownMs = SEAT_COOLDOWN_MS,
+    now = () => Date.now()
 }) {
+    // 席位查询防重复点击：key=会话+股票+日期 → 状态（生成中/已发送时间）
+    const seatRequests = new Map();
+
+    // 返回 null 表示可以处理；否则返回提示文案（正在生成 / 冷却期内已发送）
+    function seatRequestBlocked(key) {
+        const current = now();
+        for (const [entryKey, entry] of seatRequests) {
+            if (!entry.pending && current - entry.at >= seatCooldownMs) seatRequests.delete(entryKey);
+        }
+        const entry = seatRequests.get(key);
+        if (!entry) return null;
+        return entry.pending ? MESSAGES.seatPending : MESSAGES.seatRecentlySent;
+    }
     function isPrivateChat(chat) {
         return !privateOnly || !chat?.type || chat.type === "private";
     }
@@ -121,6 +151,44 @@ function createBotController({
         return reply(chatId, view.longhuToggledText(enabled));
     }
 
+    // 龙虎榜推送里点击股票名称（t.me 深层链接）后，回复该股当日的买卖席位明细
+    // 同一会话对同一只股票同一天的席位：生成中或冷却期内不重复发送。
+    // onAccepted / onBlocked 在开始处理前调用（按钮点击需立即应答，避免生成期间按钮一直转圈引发重按）
+    async function showLonghuSeatsOnce(chatId, query, { onAccepted = async () => {}, onBlocked = async () => {} } = {}) {
+        const key = `${chatId}:${query.symbol}:${query.date}`;
+        const blocked = seatRequestBlocked(key);
+        if (blocked) return onBlocked(blocked);
+        seatRequests.set(key, { pending: true, at: now() });
+        try {
+            await onAccepted();
+            return await showLonghuSeats(chatId, query);
+        } finally {
+            seatRequests.set(key, { pending: false, at: now() });
+        }
+    }
+
+    async function showLonghuSeats(chatId, { symbol, date }) {
+        let detail = null;
+        try {
+            detail = longhuService ? await longhuService.getSeatDetails(date, symbol) : null;
+        } catch (error) {
+            console.error(`⚠️ 龙虎榜席位查询失败（${symbol} ${date}）：${formatError(error)}`);
+        }
+        if (!detail) return reply(chatId, formatSeatNotFound({ date, symbol }));
+        // 席位以表格图片展示；画图失败或未注入发图函数时退回文字版
+        if (sendPhoto) {
+            try {
+                const png = renderSeatChart({ date, detail });
+                return await sendPhoto(chatId, png, formatSeatCaption({ date, detail }), `lhb-${symbol}-${date}.png`, {
+                    replyMarkup: formatSeatKeyboard({ date, symbol })
+                });
+            } catch (error) {
+                console.error(`⚠️ 龙虎榜席位表格发送失败，改发文字（${symbol} ${date}）：${formatError(error)}`);
+            }
+        }
+        return reply(chatId, formatSeatDetail({ date, detail }));
+    }
+
     async function handleMessage(message) {
         const chatId = message.chat && message.chat.id;
         if (!chatId) return;
@@ -129,6 +197,14 @@ function createBotController({
         if (!isPrivateChat(message.chat)) return;
 
         const startArgument = commandArgument(text, "start");
+        const seatQuery = startArgument && parseLonghuStartPayload(startArgument);
+        if (seatQuery) {
+            // 深层链接只给已订阅的用户查看；其他人按未注册处理，不把链接参数当成邀请码
+            if (isAdmin(chatId) || await isActiveSubscriber(chatId)) {
+                return showLonghuSeatsOnce(chatId, seatQuery);
+            }
+            return sendMessage(chatId, inviteCode ? MESSAGES.registerWithInvite : MESSAGES.registerFirst);
+        }
         if (startArgument !== null) return register(message, startArgument.trim());
         const subscriber = await store.getSubscriber(chatId);
         if (subscriber?.status !== "active") {
@@ -169,8 +245,16 @@ function createBotController({
         if (!chatId || !isPrivateChat(query.message?.chat) || !await isActiveSubscriber(chatId)) {
             return answerCallback(query.id, { text: MESSAGES.unauthorizedCallback, showAlert: true });
         }
-        await answerCallback(query.id);
         const data = String(query.data || "");
+        // 龙虎榜推送图片下方的股票名称按钮：重复点击时只弹出提示
+        const seatQuery = parseLonghuCallbackData(data);
+        if (seatQuery) {
+            return showLonghuSeatsOnce(chatId, seatQuery, {
+                onAccepted: () => answerCallback(query.id),
+                onBlocked: text => answerCallback(query.id, { text })
+            });
+        }
+        await answerCallback(query.id);
         if (data === "delete_cancel") return reply(chatId, MESSAGES.removeCancelled);
         if (data.startsWith("delete:")) {
             const symbol = normalizeSymbol(data.slice("delete:".length));
