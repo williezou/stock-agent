@@ -1,8 +1,7 @@
-const { menuReplyMarkup } = require("./bot-service");
+const { removeKeyboardMarkup } = require("./bot-service");
 const { sendTelegramTo, telegramRequest } = require("./telegram");
 
 const COMMANDS = [
-    { command: "menu", description: "显示操作菜单" },
     { command: "add", description: "添加每日追踪股票" },
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
@@ -37,7 +36,7 @@ async function configureTelegramWebhook(options = {}) {
 
     if (options.announce) {
         if (!chatId) throw new Error("缺少TELEGRAM_CHAT_ID");
-        await sendTelegramTo(chatId, "✅ 股票追踪菜单已启用。", { replyMarkup: menuReplyMarkup() });
+        await sendTelegramTo(chatId, "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。", { replyMarkup: removeKeyboardMarkup() });
     }
     return webhookUrl;
 }

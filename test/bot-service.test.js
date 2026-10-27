@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { BUTTONS, createBotController, menuReplyMarkup } = require("../bot-service");
+const { LEGACY_BUTTONS, createBotController, removeKeyboardMarkup } = require("../bot-service");
 
 function createMemoryStore(initial = [], registered = true) {
     const items = new Map([["100", new Map(initial.map(item => [item.symbol, item]))]]);
@@ -68,10 +68,18 @@ function privateMessage(text, chatId = 100, userId = 200) {
     return { message: { chat: { id: chatId, type: "private" }, from: { id: userId, first_name: "测试" }, text } };
 }
 
-test("菜单提供添加、删除和追踪列表按钮", () => {
-    const markup = menuReplyMarkup();
-    const labels = markup.keyboard.flat().map(item => item.text);
-    assert.deepEqual(labels, [BUTTONS.ADD, BUTTONS.REMOVE, BUTTONS.LIST]);
+test("菜单回复会移除旧的常驻按钮键盘", async () => {
+    assert.deepEqual(removeKeyboardMarkup(), { remove_keyboard: true });
+    const { controller, sent } = setup();
+    await controller.handleUpdate(privateMessage("/menu"));
+    assert.deepEqual(sent.at(-1).options.replyMarkup, { remove_keyboard: true });
+    assert.match(sent.at(-1).text, /Menu/);
+});
+
+test("旧版按钮文字仍可使用", async () => {
+    const { controller, sent } = setup();
+    await controller.handleUpdate(privateMessage(LEGACY_BUTTONS.LIST));
+    assert.match(sent.at(-1).text, /当前没有每日追踪股票/);
 });
 
 test("新用户通过/start建立独立订阅", async () => {
@@ -168,6 +176,6 @@ test("名额已满时已停用用户也不能重新启用", async () => {
 test("已停用用户点击菜单按钮仍会收到恢复提示", async () => {
     const { controller, sent } = setup();
     await controller.handleUpdate(privateMessage("/stop"));
-    await controller.handleUpdate(privateMessage(BUTTONS.LIST));
+    await controller.handleUpdate(privateMessage(LEGACY_BUTTONS.LIST));
     assert.match(sent.at(-1).text, /\/start/);
 });

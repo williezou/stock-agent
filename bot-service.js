@@ -1,22 +1,18 @@
 const { escapeHtml } = require("./daily-format");
 const { buildTarget, normalizeSymbol } = require("./stocks");
 
-const BUTTONS = {
+// 旧版常驻按钮的文字；按钮键盘已由Menu命令取代，保留识别以兼容尚未刷新的聊天
+const LEGACY_BUTTONS = {
     ADD: "➕ 添加股票",
     REMOVE: "➖ 删除股票",
     LIST: "📋 追踪列表"
 };
 
-function menuReplyMarkup() {
-    return {
-        keyboard: [
-            [{ text: BUTTONS.ADD }, { text: BUTTONS.REMOVE }],
-            [{ text: BUTTONS.LIST }]
-        ],
-        resize_keyboard: true,
-        is_persistent: true,
-        input_field_placeholder: "选择操作或输入 /add 600519"
-    };
+const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表";
+
+// 操作入口统一放在Menu命令里；每次回复都移除旧的常驻按钮键盘，避免与Menu重复
+function removeKeyboardMarkup() {
+    return { remove_keyboard: true };
 }
 
 function commandArgument(text, command) {
@@ -69,11 +65,11 @@ function createBotController({
             maxActive: admin ? 0 : maxSubscribers
         });
         if (!subscriber) return sendMessage(chatId, "当前订阅名额已满，请联系机器人管理员。");
-        return sendMenu(chatId, "✅ 订阅已启用。你的自选股与其他用户完全独立。\n请先添加需要每日追踪的股票。");
+        return sendMenu(chatId, `✅ 订阅已启用。你的自选股与其他用户完全独立。\n${HELP_TEXT}`);
     }
 
     async function sendMenu(chatId, text = "请选择要执行的操作：") {
-        return sendMessage(chatId, text, { replyMarkup: menuReplyMarkup() });
+        return sendMessage(chatId, text, { replyMarkup: removeKeyboardMarkup() });
     }
 
     async function showList(chatId) {
@@ -153,7 +149,7 @@ function createBotController({
                 : "请先发送 /start 启用每日股票追踪。");
         }
 
-        if (/^\/menu(?:@\w+)?$/i.test(text)) return sendMenu(chatId, "每日股票追踪机器人已就绪。");
+        if (/^\/(?:menu|help)(?:@\w+)?$/i.test(text)) return sendMenu(chatId, HELP_TEXT);
         if (/^\/stop(?:@\w+)?$/i.test(text)) {
             await store.deactivateSubscriber(chatId);
             return sendMessage(chatId, "已暂停每日推送。你的自选股仍会保留，发送 /start 可随时恢复。", {
@@ -164,9 +160,9 @@ function createBotController({
             await store.clearSession(chatId);
             return sendMenu(chatId, "已取消当前操作。");
         }
-        if (text === BUTTONS.LIST || /^\/list(?:@\w+)?$/i.test(text)) return showList(chatId);
-        if (text === BUTTONS.ADD) return promptAdd(chatId);
-        if (text === BUTTONS.REMOVE) return showDeleteButtons(chatId);
+        if (text === LEGACY_BUTTONS.LIST || /^\/list(?:@\w+)?$/i.test(text)) return showList(chatId);
+        if (text === LEGACY_BUTTONS.ADD) return promptAdd(chatId);
+        if (text === LEGACY_BUTTONS.REMOVE) return showDeleteButtons(chatId);
 
         const addArgument = commandArgument(text, "add");
         if (addArgument !== null) return addArgument ? addStock(chatId, addArgument) : promptAdd(chatId);
@@ -174,7 +170,7 @@ function createBotController({
         if (removeArgument !== null) return removeArgument ? removeStock(chatId, removeArgument) : showDeleteButtons(chatId);
 
         if (await store.getSession(chatId) === "add") return addStock(chatId, text);
-        return sendMenu(chatId, "未识别该指令，可使用下方菜单或 /add、/remove、/list。");
+        return sendMenu(chatId, `未识别该指令。\n${HELP_TEXT}`);
     }
 
     async function handleCallback(query) {
@@ -213,4 +209,4 @@ function createBotController({
     return { handleUpdate, sendMenu, showList };
 }
 
-module.exports = { BUTTONS, createBotController, menuReplyMarkup };
+module.exports = { LEGACY_BUTTONS, createBotController, removeKeyboardMarkup };
