@@ -108,6 +108,7 @@ function analyzeKlines(klines) {
         throw new Error("至少需要20个交易日的数据才能生成收盘分析");
     }
 
+    // 成交额、换手率为可选字段（备用数据源的历史K线可能缺失）：分析只读取最新一根的这两个值，展示时缺失显示为“不可用”
     const rows = klines.filter(item =>
         item &&
         Number.isFinite(item.open) &&
@@ -115,9 +116,7 @@ function analyzeKlines(klines) {
         Number.isFinite(item.high) &&
         Number.isFinite(item.low) &&
         Number.isFinite(item.volume) &&
-        Number.isFinite(item.amount) &&
-        Number.isFinite(item.changePct) &&
-        Number.isFinite(item.turnover)
+        Number.isFinite(item.changePct)
     );
     if (rows.length < 20) throw new Error("有效日线数据不足20个交易日");
 

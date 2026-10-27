@@ -153,6 +153,49 @@ async function getContextItems(newsService, targets) {
     }, 2);
 }
 
+const KLINE_DAYS = 140;
+const KLINE_CONCURRENCY = 3;
+const KLINE_REQUEST_GAP_MS = 200;
+
+// 全局请求节流：所有并发worker共享同一时间槽，保证相邻两次请求至少间隔gapMs，而不是每个worker各等一遍
+function createRateLimiter(gapMs) {
+    let nextAt = 0;
+    return async function wait() {
+        const now = Date.now();
+        const at = Math.max(now, nextAt);
+        nextAt = at + gapMs;
+        if (at > now) await delay(at - now);
+    };
+}
+
+// 只缓存字段完整的日K（东方财富、同花顺）；腾讯备用数据缺少历史成交额/换手率，不缓存，以便主源恢复后重新拉取
+function isCompleteKlines(rows) {
+    return rows.every(row => Number.isFinite(row.amount) && Number.isFinite(row.turnover));
+}
+
+// 限流拉取日K：并发上限+全局请求间隔，避免自选股并集较大时瞬间打满行情接口触发封禁；
+// 传入klineCache时，当日已收定的完整日K会被缓存，重试只拉取尚未就绪的股票
+async function fetchKlineSets(marketService, targets, { klineCache, dateStr, gapMs = KLINE_REQUEST_GAP_MS } = {}) {
+    const waitTurn = createRateLimiter(gapMs);
+    return runPool(targets, async target => {
+        if (klineCache) {
+            const cached = await klineCache.getCachedKlines(target.symbol, dateStr).catch(() => null);
+            if (cached) return { status: "fulfilled", value: cached };
+        }
+        await waitTurn();
+        try {
+            const rows = await marketService.getDailyKline(target.symbol, KLINE_DAYS);
+            if (klineCache && rows.at(-1) && rows.at(-1).date === dateStr && isCompleteKlines(rows)) {
+                await klineCache.saveCachedKlines(target.symbol, dateStr, rows)
+                    .catch(error => console.log(`⚠️ ${target.symbol}日K缓存写入失败: ${formatError(error)}`));
+            }
+            return { status: "fulfilled", value: rows };
+        } catch (reason) {
+            return { status: "rejected", reason };
+        }
+    }, KLINE_CONCURRENCY);
+}
+
 async function loadTargets() {
     if (!process.env.DATABASE_URL) return DEFAULT_TARGETS;
     if (!process.env.TELEGRAM_CHAT_ID) throw new Error("使用数据库自选股时必须配置TELEGRAM_CHAT_ID");
@@ -166,9 +209,36 @@ async function loadTargets() {
     }
 }
 
-async function buildReports({ dryRun = false, now = new Date(), targets, allowPartial = false } = {}) {
-    const httpClient = createHttpClient();
-    const marketService = createMarketService({ httpClient, requestWithRetry });
+// 行情服务在进程内复用，数据源熔断冷却才能跨调度轮次生效（否则每轮都会重新冲击已封禁的接口）
+let sharedServices;
+function getSharedServices() {
+    if (!sharedServices) {
+        const httpClient = createHttpClient();
+        sharedServices = { httpClient, marketService: createMarketService({ httpClient, requestWithRetry }) };
+    }
+    return sharedServices;
+}
+
+// 共享服务的健康计数是累计值，这里取本次调用期间的增量
+function healthDelta(before, after) {
+    const sources = {};
+    for (const [name, count] of Object.entries(after.sources)) {
+        const delta = count - (before.sources[name] || 0);
+        if (delta > 0) sources[name] = delta;
+    }
+    return {
+        primaryFailures: after.primaryFailures - before.primaryFailures,
+        fallbackUsed: after.fallbackUsed - before.fallbackUsed,
+        fallbackFailures: after.fallbackFailures - before.fallbackFailures,
+        lastPrimaryError: after.primaryFailures > before.primaryFailures ? after.lastPrimaryError : "",
+        sources
+    };
+}
+
+async function buildReports({ dryRun = false, now = new Date(), targets, allowPartial = false, klineCache } = {}) {
+    const { httpClient, marketService } = getSharedServices();
+    const healthBefore = marketService.health();
+    const dataHealth = () => healthDelta(healthBefore, marketService.health());
     const newsService = createNewsService({
         httpClient,
         requestWithRetry,
@@ -195,9 +265,7 @@ async function buildReports({ dryRun = false, now = new Date(), targets, allowPa
         if (!isAfterChinaClose(now)) {
             return { skipped: true, reason: "北京时间15:15前不使用可能尚未收定的日K", date: null, reports: [], unavailable: [] };
         }
-        const settled = await Promise.allSettled(
-            activeTargets.map(target => marketService.getDailyKline(target.symbol, 140))
-        );
+        const settled = await fetchKlineSets(marketService, activeTargets, { klineCache, dateStr });
         const ready = [];
         settled.forEach((result, index) => {
             const target = activeTargets[index];
@@ -217,14 +285,18 @@ async function buildReports({ dryRun = false, now = new Date(), targets, allowPa
                 reason: `${dateStr}没有完整日K，按非交易日或数据未就绪处理`,
                 date: null,
                 reports: [],
-                unavailable
+                unavailable,
+                dataHealth: dataHealth()
             };
         }
         reportTargets = ready.map(item => item.target);
         klineSets = ready.map(item => item.rows);
         selection = { date: dateStr, reason: "" };
     } else {
-        klineSets = await Promise.all(activeTargets.map(target => marketService.getDailyKline(target.symbol, 140)));
+        const settled = await fetchKlineSets(marketService, activeTargets);
+        const failed = settled.find(result => result.status === "rejected");
+        if (failed) throw failed.reason;
+        klineSets = settled.map(result => result.value);
         selection = selectReportDate(klineSets, { dryRun, now });
     }
     if (!selection.date) return { skipped: true, reason: selection.reason, date: null, reports: [] };
@@ -245,7 +317,7 @@ async function buildReports({ dryRun = false, now = new Date(), targets, allowPa
             announcements: contextItems[index].announcements
         };
     });
-    return { skipped: false, reason: "", date: selection.date, reports, unavailable };
+    return { skipped: false, reason: "", date: selection.date, reports, unavailable, dataHealth: dataHealth() };
 }
 
 async function deliverDailyClose({ chatId, reports, date, dryRun = false }) {
@@ -306,6 +378,8 @@ module.exports = {
     buildReports,
     commonLatestDate,
     deliverDailyClose,
+    fetchKlineSets,
+    healthDelta,
     loadTargets,
     prioritize,
     runDailyClose,

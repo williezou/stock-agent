@@ -112,3 +112,54 @@ test("单个用户的状态写入失败不会中断后续用户", async () => {
     assert.equal(outcome.failed, 1);
     assert.equal(outcome.delivered, 1);
 });
+
+test("行情源异常时每天只提醒管理员一次", async () => {
+    const { calls, store } = partialStore();
+    const alerts = [];
+    const alerted = new Set();
+    const services = {
+        async buildReports() {
+            return {
+                skipped: false,
+                date: "2026-10-27",
+                reports: [{ meta: { symbol: "600887" } }, { meta: { symbol: "002380" } }],
+                dataHealth: { primaryFailures: 2, fallbackUsed: 4, fallbackFailures: 0, lastPrimaryError: "ECONNRESET" }
+            };
+        },
+        async deliverDailyClose() {},
+        async sendTelegramTo(chatId, text) { if (chatId === "admin") alerts.push(text); },
+        adminChatId: "admin",
+        alerted
+    };
+    await runSchedulerTick(store, finalWindow, services);
+    await runSchedulerTick(store, finalWindow, services);
+    assert.equal(alerts.length, 1);
+    assert.match(alerts[0], /东方财富.*ECONNRESET.*切换备用源/);
+    assert.equal(calls.completed.length, 4);
+});
+
+test("告警发送失败会在下一轮重试，生成失败在最后机会提示最终失败", async () => {
+    const { store } = partialStore();
+    const alerts = [];
+    let failSend = true;
+    const alerted = new Set(["2026-10-26:primary"]);
+    const services = {
+        async buildReports() { throw new Error("行情全部失败"); },
+        async deliverDailyClose() {},
+        async sendTelegramTo(chatId, text) {
+            if (failSend) throw new Error("network");
+            alerts.push(text);
+        },
+        adminChatId: "admin",
+        alerted
+    };
+    await assert.rejects(runSchedulerTick(store, new Date("2026-10-27T08:00:00.000Z"), services));
+    assert.equal(alerts.length, 0);
+    assert.ok(!alerted.has("2026-10-26:primary"), "往日告警记录被清理");
+    failSend = false;
+    await assert.rejects(runSchedulerTick(store, new Date("2026-10-27T08:10:00.000Z"), services));
+    assert.match(alerts[0], /将在约10分钟后重试/);
+    await assert.rejects(runSchedulerTick(store, new Date("2026-10-27T09:55:00.000Z"), services));
+    assert.match(alerts[1], /最终生成失败/);
+    assert.equal(alerts.length, 2);
+});

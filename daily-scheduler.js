@@ -10,6 +10,7 @@ const { createWatchlistStore } = require("./watchlist-store");
 const CHECK_INTERVAL_MS = Number(process.env.SCHEDULER_CHECK_INTERVAL_MS || 30000);
 const MAX_ATTEMPTS = Number(process.env.DAILY_CLOSE_MAX_ATTEMPTS || 12);
 const JOB_NAME = "daily-close";
+const RETRY_DELAY_MS = 10 * 60 * 1000; // 与failDeliveryRun中的next_attempt_at间隔一致
 
 function isRunWindow(now = new Date()) {
     const clock = getChinaClock(now);
@@ -41,12 +42,53 @@ function isBotBlocked(error) {
     return error?.response?.status === 403;
 }
 
+// 行情源告警按“日期+类型”去重，每天每类最多提醒管理员一次（进程内）
+const sentAlerts = new Set();
+
+function dataSourceAlerts(health, dateStr) {
+    if (!health) return [];
+    const alerts = [];
+    if (health.primaryFailures > 0) {
+        alerts.push({
+            key: `${dateStr}:primary`,
+            text: `⚠️ 东方财富行情接口异常（${health.lastPrimaryError || "未知错误"}，失败${health.primaryFailures}次），今日已自动切换备用源（${Object.keys(health.sources || {}).join("、") || "同花顺/腾讯"}）。`
+        });
+    }
+    if (health.fallbackFailures > 0) {
+        alerts.push({
+            key: `${dateStr}:fallback`,
+            text: `❌ 东方财富、同花顺、腾讯行情源均获取失败（${health.fallbackFailures}只股票），相关用户的收盘报告将延迟或缺少这些股票。`
+        });
+    }
+    return alerts;
+}
+
+// 发送成功后才记为已提醒，失败的告警会在下一轮重试；同时清理往日记录，避免集合无限增长
+async function alertAdmin({ notify, adminChatId, alerted, dateStr }, { key, text }) {
+    if (!adminChatId || alerted.has(key)) return;
+    for (const existing of alerted) {
+        if (!existing.startsWith(`${dateStr}:`)) alerted.delete(existing);
+    }
+    try {
+        await notify(adminChatId, text);
+        alerted.add(key);
+    } catch (error) {
+        console.error(`⚠️ 管理员告警发送失败：${error.message}`);
+    }
+}
+
 async function runSchedulerTick(store, now = new Date(), services = {}) {
     if (!isRunWindow(now)) return { action: "outside-window" };
     const reportBuilder = services.buildReports || buildReports;
     const deliver = services.deliverDailyClose || deliverDailyClose;
     const notify = services.sendTelegramTo || sendTelegramTo;
     const { dateStr } = getChinaClock(now);
+    const alertContext = {
+        notify,
+        adminChatId: services.adminChatId ?? process.env.TELEGRAM_CHAT_ID,
+        alerted: services.alerted || sentAlerts,
+        dateStr
+    };
     const subscribers = await store.listDueSubscribers(JOB_NAME, dateStr, MAX_ATTEMPTS);
     const recipients = [];
 
@@ -68,13 +110,23 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             targets: uniqueTargets(recipients),
             now,
             dryRun: false,
-            allowPartial: true
+            allowPartial: true,
+            klineCache: typeof store.getCachedKlines === "function" ? store : undefined
         });
     } catch (error) {
         await Promise.allSettled(recipients.map(recipient =>
             store.failDeliveryRun(JOB_NAME, recipient.subscriber.chat_id, dateStr, error.message)
         ));
+        // 下一次重试已落在投递窗口外或次数用尽时，提示最终失败，而不是承诺会重试
+        const retryAt = new Date(now.getTime() + RETRY_DELAY_MS);
+        const lastChance = !isRunWindow(retryAt) || recipients.every(recipient => recipient.attempt >= MAX_ATTEMPTS);
+        await alertAdmin(alertContext, lastChance
+            ? { key: `${dateStr}:build-final`, text: `❌ 今日收盘报告最终生成失败：${error.message}。已停止重试，今日不再推送。` }
+            : { key: `${dateStr}:build`, text: `❌ 每日收盘报告生成失败：${error.message}。将在约10分钟后重试。` });
         throw error;
+    }
+    for (const alert of dataSourceAlerts(result.dataHealth, dateStr)) {
+        await alertAdmin(alertContext, alert);
     }
 
     if (result.skipped) {
@@ -192,6 +244,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    dataSourceAlerts,
     isFinalWindow,
     isRunWindow,
     isTransientSkip,
