@@ -20,7 +20,7 @@ const { analyzeKlines, buildTradePlan } = require("./technical-analysis");
 const CONCURRENCY = 5;
 const REQUEST_GAP_MS = 120; // 轻微节流，避免触发限流
 const NEWS_MIN_SCORE_THRESHOLD = 4; // 只有接近阈值的才拉新闻，减少请求量
-const CANDIDATE_PER_STYLE = 20;
+const CANDIDATE_PER_STYLE = 20; // 每种风格取前N名拉新闻公告
 const PICKS_PER_STYLE = 2; // 每类入选数量，对应一张总览图
 const KLINE_DAYS = 140;
 const NEWS_PER_STOCK = 3;
@@ -186,17 +186,18 @@ async function collectMarketHeat(services) {
     }
 }
 
-// 返回 { ok, reason, date, picksByStyle, longhiData }；非交易日或股票池获取失败时ok=false
+// 返回 { ok, reason, retryable, date, picksByStyle, longhiData }；
+// 非交易日 ok=false 且 retryable=false（正常跳过），股票池获取失败 ok=false 且 retryable=true（属于故障）
 async function runScan(services = createScanServices()) {
     console.log("🚀 开始扫描...");
     const trading = await isTradingDay({ httpClient: services.httpClient, requestWithRetry });
-    if (!trading.ok) return { ok: false, reason: `非交易日（${trading.reason}）：${trading.dateStr}` };
+    if (!trading.ok) return { ok: false, retryable: false, reason: `非交易日（${trading.reason}）：${trading.dateStr}` };
 
     let stocks;
     try {
         stocks = applyStockFilters(await services.stockList.getLiquidPool());
     } catch (error) {
-        return { ok: false, reason: `拉取A股列表失败: ${error.code || formatError(error)}` };
+        return { ok: false, retryable: true, reason: `拉取A股列表失败: ${error.code || formatError(error)}` };
     }
 
     const scored = scorePool(stocks);

@@ -55,7 +55,7 @@ test/              mirrors src/
 
 ## Run
 ```
-npm run scan            # A-share scan, sends to TELEGRAM_CHAT_ID
+npm run scan            # A-share scan, sends to TELEGRAM_CHAT_ID (scheduled on GitHub Actions)
 npm run scan:dry-run    # print only
 ```
 
@@ -69,13 +69,13 @@ Run the Telegram task:
 npm run daily-close
 ```
 
-The GitHub Actions workflow in `.github/workflows/daily-close.yml` runs at 15:30 Asia/Shanghai on weekdays. Configure `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and the external PostgreSQL `DATABASE_URL` as repository secrets. The script sends nothing unless every tracked stock has a completed daily bar for the current China trading date.
+The A-share scan runs on GitHub Actions (`scan.yml`, weekday schedule) so its heavy request volume does not get the local IP rate-limited; the stock list falls back from Eastmoney to Sina. `daily-close.yml` is a manual-only backup; close reports and the Dragon-Tiger list run from the local Docker scheduler to avoid duplicates. Configure `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and the external PostgreSQL `DATABASE_URL` as repository secrets. The script sends nothing unless every tracked stock has a completed daily bar for the current China trading date.
 
 ## Telegram menu deployment
 
 ### Local Docker deployment (recommended)
 
-Local deployment uses Telegram long polling, so no public IP, domain, or HTTPS endpoint is required. Docker Compose runs a polling bot, a weekday 15:30 Asia/Shanghai scheduler with delayed retries, and a private PostgreSQL database:
+Local deployment uses Telegram long polling, so no public IP, domain, or HTTPS endpoint is required. Docker Compose runs a polling bot, a weekday scheduler (Asia/Shanghai: 15:30-18:00 close reports, 17:30-20:30 Dragon-Tiger list) with delayed retries, and a private PostgreSQL database:
 
 ```bash
 docker compose up -d --build

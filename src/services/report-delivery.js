@@ -4,9 +4,11 @@ const { delay } = require("../lib/async");
 const { formatError } = require("../lib/http");
 const { generateOverviewChart, generateStockChart } = require("../views/charts/stock-charts");
 const { formatDailyCloseDelivery } = require("../views/daily-report-view");
+const { formatScanDelivery, formatScanSummary } = require("../views/scan-view");
 
 // Telegram同一会话连续发送的间隔，避免触发限流
 const SEND_GAP_MS = 350;
+const SUMMARY_RETRY_DELAY_MS = 2000;
 
 // 每日收盘报告：先发总览图，再逐只发个股图；dryRun时只在控制台打印
 async function deliverDailyClose({ chatId, reports, date, dryRun = false }) {
@@ -36,7 +38,8 @@ async function deliverDailyClose({ chatId, reports, date, dryRun = false }) {
     return delivery;
 }
 
-// A股扫描：结论文字 + 分类总览图 + 可操作标的个股图。每条消息独立发送，单张失败不影响其余内容
+// A股扫描：结论文字 + 分类总览图 + 可操作标的个股图。每条消息独立发送，单张失败不影响其余内容；
+// 结论文字（含操作建议）最重要，首次失败时在图片发完后再补发一次，不重发已成功的图片
 async function deliverScan({ chatId, summary, delivery, date, dryRun = false }) {
     if (dryRun) {
         console.log(`\n===== 扫描结论（${summary.length}字符）=====\n${summary}`);
@@ -57,12 +60,14 @@ async function deliverScan({ chatId, summary, delivery, date, dryRun = false }) 
         try {
             await send();
             sent++;
+            return true;
         } catch (error) {
             failed++;
             console.log(`⚠️ ${label} 发送失败:`, formatError(error));
+            return false;
         }
     }
-    await sendStep("扫描结论", () => telegram.sendMessage(chatId, summary));
+    const summarySent = await sendStep("扫描结论", () => telegram.sendMessage(chatId, summary));
     for (const item of delivery.overviews) {
         await delay(SEND_GAP_MS);
         await sendStep(item.filename, () =>
@@ -75,7 +80,26 @@ async function deliverScan({ chatId, summary, delivery, date, dryRun = false }) 
             telegram.sendPhoto(chatId, generateStockChart(item.report), item.caption, item.filename)
         );
     }
+    if (!summarySent) {
+        // 补发针对的是同一条消息：成功则抵消首次失败，失败也不重复计数
+        await delay(SUMMARY_RETRY_DELAY_MS);
+        try {
+            await telegram.sendMessage(chatId, summary);
+            sent++;
+            failed--;
+        } catch (error) {
+            console.log("⚠️ 扫描结论（补发）发送失败:", formatError(error));
+        }
+    }
     return { sent, failed };
 }
 
-module.exports = { deliverDailyClose, deliverScan };
+// 由扫描结果生成结论与图表并推送；返回 { sent, failed, total }
+async function deliverScanResult({ chatId, result, now, dryRun = false }) {
+    const summary = formatScanSummary({ now, picksByStyle: result.picksByStyle, longhiData: result.longhiData });
+    const delivery = formatScanDelivery({ picksByStyle: result.picksByStyle, date: result.date });
+    const { sent, failed } = await deliverScan({ chatId, summary, delivery, date: result.date, dryRun });
+    return { sent, failed, total: 1 + delivery.overviews.length + delivery.stocks.length };
+}
+
+module.exports = { deliverDailyClose, deliverScan, deliverScanResult };

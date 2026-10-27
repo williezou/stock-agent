@@ -1,33 +1,30 @@
-// A股扫描（推送给管理员）；加 --dry-run 只打印不发送
+// A股扫描（推送给管理员），由GitHub Actions定时执行；加 --dry-run 只打印不发送
 const { config } = require("../src/config");
 const { formatError } = require("../src/lib/http");
 const { nowChinaString } = require("../src/models/market/trading-calendar");
-const { deliverScan } = require("../src/services/report-delivery");
+const { deliverScanResult } = require("../src/services/report-delivery");
 const { runScan } = require("../src/services/scan");
-const { formatScanDelivery, formatScanSummary } = require("../src/views/scan-view");
 
 async function main({ dryRun = process.argv.includes("--dry-run") } = {}) {
-    const result = await runScan();
-    if (!result.ok) {
-        console.log(`🛑 ${result.reason}`);
-        return;
-    }
-    const summary = formatScanSummary({ now: nowChinaString(), picksByStyle: result.picksByStyle, longhiData: result.longhiData });
-    const delivery = formatScanDelivery({ picksByStyle: result.picksByStyle, date: result.date });
     if (!dryRun && (!config.telegram.botToken || !config.telegram.adminChatId)) {
         console.log("⚠️ 未配置TELEGRAM_BOT_TOKEN或TELEGRAM_CHAT_ID，跳过推送");
         return;
     }
-
-    const { sent, failed } = await deliverScan({
+    const result = await runScan();
+    if (!result.ok) {
+        console.log(`🛑 ${result.reason}`);
+        // 非交易日正常结束；取数失败以非0退出，GitHub Actions会把本次运行标为失败并通知
+        if (result.retryable) process.exitCode = 1;
+        return;
+    }
+    const { sent, failed, total } = await deliverScanResult({
         chatId: config.telegram.adminChatId,
-        summary,
-        delivery,
-        date: result.date,
+        result,
+        now: nowChinaString(),
         dryRun
     });
     if (dryRun) return;
-    console.log(`✅ 已发送${sent}条消息（结论、${delivery.overviews.length}张分类总览图、${delivery.stocks.length}张个股图），失败${failed}条`);
+    console.log(`✅ 已发送${sent}/${total}条消息，失败${failed}条`);
     if (failed) process.exitCode = 1;
 }
 

@@ -47,5 +47,10 @@ test("上榜原因压缩为简短说法并去重", () => {
     assert.equal(compactReason("当日收盘价跌幅达到-20%的前5只股票"), "日跌幅20%");
     assert.equal(compactReason("有价格涨跌幅限制的连续10个交易日内收盘价格跌幅偏离值累计达到-50%的证券"), "10日跌幅偏离50%");
     assert.equal(compactReason("严重异常期间日收盘价格涨幅偏离值累计达到100%的证券"), "严重异常涨幅偏离100%");
+    // 同花顺措辞
+    assert.equal(compactReason("日涨幅偏离值达7%的证券;日振幅值达15%的证券;日换手率达20%的证券"), "日涨幅偏离7%、振幅15%、换手率20%");
+    assert.equal(compactReason("连续三个交易日内,涨幅偏离值累计达20%的证券"), "3日涨幅偏离20%");
+    assert.equal(compactReason("连续3个交易日内收盘价格跌幅较基准指数偏离值累计达到-30%的证券"), "3日跌幅偏离30%");
+    assert.equal(compactReason("有价格涨跌幅限制的日价格振幅达到30%的证券;有价格涨跌幅限制的日收盘价格涨幅达到20%的证券"), "振幅30%、日涨幅20%");
     assert.equal(compactReason("其他异常波动"), "其他异常波动");
 });

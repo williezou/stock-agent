@@ -1,4 +1,4 @@
-// 多用户每日调度器：常驻进程，按固定间隔执行收盘报告与龙虎榜两个任务的调度轮次
+// 每日调度器：常驻进程，按固定间隔执行收盘报告与龙虎榜两个任务的调度轮次（A股扫描在GitHub Actions执行）
 const { openStore } = require("../src/app");
 const { config, requireConfig } = require("../src/config");
 const { runLonghuTick } = require("../src/controllers/longhu-controller");
@@ -19,7 +19,7 @@ async function startScheduler() {
         TELEGRAM_CHAT_ID: config.telegram.adminChatId
     });
     const store = await openStore();
-    console.log("⏰ 多用户调度器已启动：工作日北京时间15:30-18:00推送收盘报告，17:30-20:30龙虎榜发布后推送");
+    console.log("⏰ 调度器已启动（工作日北京时间）：15:30-18:00 收盘报告，17:30-20:30 龙虎榜发布后推送");
 
     let stopped = false;
     const stop = () => { stopped = true; };
@@ -42,7 +42,7 @@ async function startScheduler() {
         }
     } finally {
         await store.close();
-        console.log("每日收盘调度器已停止");
+        console.log("每日调度器已停止");
     }
 }
 

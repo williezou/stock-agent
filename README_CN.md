@@ -53,7 +53,7 @@ test/              与 src/ 结构对应
 
 ## 运行
 ```
-npm run scan            # A股扫描，推送给 TELEGRAM_CHAT_ID
+npm run scan            # A股扫描，推送给 TELEGRAM_CHAT_ID（日常由 GitHub Actions 定时执行）
 npm run scan:dry-run    # 只输出到终端
 ```
 
@@ -67,7 +67,7 @@ npm run daily-close:dry-run
 npm run daily-close
 ```
 
-GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北京时间 15:30 触发。仓库需要配置 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 和 PostgreSQL 外部连接地址 `DATABASE_URL` Secrets；脚本会检查全部追踪股票是否都有当天完整日 K，节假日不会发送。
+A股扫描由 GitHub Actions 工作流 `.github/workflows/scan.yml` 在工作日定时执行（请求量大，避免本机 IP 被行情接口封禁）；股票池优先取自东方财富，失败时切换新浪财经。`daily-close.yml` 仅保留手动触发，作为本机不可用时的备用；收盘报告与龙虎榜由本地 Docker 调度器执行，避免重复。仓库需要配置 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 和 PostgreSQL 外部连接地址 `DATABASE_URL` Secrets；脚本会检查全部追踪股票是否都有当天完整日 K，节假日不会发送。
 
 ## Telegram 菜单与 Render 部署
 
@@ -76,7 +76,9 @@ GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北�
 本机部署使用 Telegram 长轮询，不需要公网 IP、域名或 HTTPS。Docker Compose 会启动：
 
 - `bot`：处理添加、删除和查看追踪股票
-- `scheduler`：工作日北京时间 15:30 后生成每日收盘报告，行情未就绪时每 10 分钟重试；17:30-20:30 每 10 分钟检查龙虎榜，沪深两市都已上榜且数量两次不变即视为发布完成并推送，20:20 后有数据即推送，交易日仍无数据会提醒管理员
+- `scheduler`（均为工作日北京时间）：
+  - 15:30 后生成每日收盘报告，行情未就绪时每 10 分钟重试
+  - 17:30-20:30 按 10 分钟时段检查龙虎榜，18:00 起沪深两市都已上榜且连续三次数量不变即视为发布完成并推送；20:20 后有数据即推送，交易日仍无数据会提醒管理员
 - `postgres`：持久化自选股与任务执行状态，数据库端口不会暴露到宿主机
 
 其他用户与机器人私聊后建立自己的订阅：配置了 `BOT_INVITE_CODE` 时使用 `/start 邀请码`；设置 `BOT_OPEN_REGISTRATION=true` 时直接发送 `/start`；两者都未设置时仅管理员（`TELEGRAM_CHAT_ID`）可注册。管理员不受邀请码和 `MAX_SUBSCRIBERS` 限制；群聊消息会被忽略。每个人只能看到和修改自己的自选股；相同股票会合并抓取和分析，再按用户分别生成报告。发送 `/stop` 可暂停推送但保留列表。
