@@ -13,7 +13,7 @@ function createSubscriberRepository(pool) {
                 first_name = COALESCE(EXCLUDED.first_name, telegram_subscribers.first_name),
                 status = 'active',
                 updated_at = NOW()
-             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone`,
+             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled`,
             [
                 String(chatId),
                 userId === undefined || userId === null ? null : String(userId),
@@ -25,7 +25,7 @@ function createSubscriberRepository(pool) {
 
     async function getSubscriber(chatId) {
         const result = await pool.query(
-            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone
+            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled
              FROM telegram_subscribers WHERE chat_id = $1`,
             [String(chatId)]
         );
@@ -59,6 +59,14 @@ function createSubscriberRepository(pool) {
         return result.rowCount > 0;
     }
 
+    async function setLonghuEnabled(chatId, enabled) {
+        const result = await pool.query(
+            "UPDATE telegram_subscribers SET longhu_enabled = $2, updated_at = NOW() WHERE chat_id = $1",
+            [String(chatId), Boolean(enabled)]
+        );
+        return result.rowCount > 0;
+    }
+
     // 确保记录存在但不改变已有状态（不覆盖用户的/stop或被屏蔽后的停用）
     async function ensureSubscriber(chatId) {
         await pool.query(
@@ -69,7 +77,7 @@ function createSubscriberRepository(pool) {
         );
     }
 
-    return { deactivateSubscriber, ensureSubscriber, getSubscriber, registerSubscriber };
+    return { deactivateSubscriber, ensureSubscriber, getSubscriber, registerSubscriber, setLonghuEnabled };
 }
 
 module.exports = { createSubscriberRepository };

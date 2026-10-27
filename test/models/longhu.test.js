@@ -30,10 +30,6 @@ test("按板块幅度识别跌停，ST按5%判断", async () => {
     assert.deepEqual(symbols, ["688001", "600001", "600002"]);
 });
 
-test("龙虎榜接口失败时返回空列表而不是抛错", async () => {
-    assert.deepEqual(await longhu.getLonghiBoardList(), []);
-});
-
 function boardRow(code, date, reason, netAmount = 1e7) {
     return {
         SECURITY_CODE: code,
@@ -44,31 +40,68 @@ function boardRow(code, date, reason, netAmount = 1e7) {
         TURNOVERRATE: "15.2",
         EXPLANATION: reason,
         BILLBOARD_NET_AMT: netAmount,
-        BILLBOARD_DEAL_AMT: netAmount * 3
+        BILLBOARD_DEAL_AMT: Math.abs(netAmount) * 3
     };
 }
 
-test("龙虎榜只保留最新交易日、按代码合并上榜原因并限制30条", async () => {
-    const rows = [
-        boardRow("600010", "2026-10-27", "日涨幅偏离值达7%"),
-        boardRow("600010", "2026-10-27", "日换手率达20%"),
-        ...Array.from({ length: 40 }, (_, i) => boardRow(String(600100 + i), "2026-10-27", "连续三日涨幅偏离20%")),
-        boardRow("600999", "2026-10-26", "前一交易日")
-    ];
-    const service = createLonghuService({
-        httpClient: { async get() { return { data: { success: true, result: { data: rows } } }; } },
+function serviceReturning(data, calls = []) {
+    return createLonghuService({
+        httpClient: { async get(url, options) { calls.push(options.params); return { data }; } },
         requestWithRetry: fn => fn()
     });
-    const list = await service.getLonghiBoardList();
-    assert.equal(list.length, 30);
-    assert.ok(!list.some(item => item.symbol === "600999"), "不混入前一交易日");
-    assert.equal(new Set(list.map(item => item.boardDate)).size, 1);
-    const merged = list.find(item => item.symbol === "600010");
-    assert.equal(merged.reason, "日涨幅偏离值达7%；日换手率达20%");
+}
+
+test("按日期获取龙虎榜：合并同一股票的上榜原因，按净买入额排序且不截断", async () => {
+    const rows = [
+        boardRow("600010", "2026-10-27", "日涨幅偏离值达7%", 5e7),
+        boardRow("600010", "2026-10-27", "日换手率达20%", 5e7),
+        ...Array.from({ length: 40 }, (_, i) => boardRow(String(600100 + i), "2026-10-27", "连续三日涨幅偏离20%", i * 1e5)),
+        boardRow("000001", "2026-10-27", "日跌幅偏离值达7%", -3e7)
+    ];
+    const calls = [];
+    const board = await serviceReturning({ success: true, result: { data: rows } }, calls).getBoardByDate("2026-10-27");
+    assert.match(calls[0].filter, /TRADE_DATE<='2026-10-27'.*TRADE_DATE>='2026-10-27'/);
+    assert.equal(board.length, 42);
+    assert.equal(board[0].symbol, "600010");
+    assert.equal(board[0].reason, "日涨幅偏离值达7%；日换手率达20%");
+    assert.equal(board.at(-1).symbol, "000001");
     assert.deepEqual(
-        Object.keys(merged).sort(),
-        ["boardDate", "boardType", "changePct", "dealAmount", "name", "netAmount", "price", "reason", "symbol", "turnoverRate"]
+        Object.keys(board[0]).sort(),
+        ["boardDate", "changePct", "dealAmount", "name", "netAmount", "price", "reason", "symbol", "turnoverRate"]
     );
-    assert.equal(merged.price, 12.34);
-    assert.equal(merged.changePct, 9.98);
+    assert.equal(board[0].price, 12.34);
+    assert.equal(board[0].boardDate, "2026-10-27");
+});
+
+test("龙虎榜尚未发布（返回数据为空）时得到空列表", async () => {
+    const board = await serviceReturning({ result: null, success: false, message: "返回数据为空", code: 9201 }).getBoardByDate("2026-10-28");
+    assert.deepEqual(board, []);
+});
+
+test("龙虎榜接口失败时抛错，便于调度区分“未发布”与“取数失败”", async () => {
+    await assert.rejects(longhu.getBoardByDate("2026-10-27"), /离线测试不应联网/);
+    await assert.rejects(
+        serviceReturning({ success: false, message: "系统繁忙", code: 500 }).getBoardByDate("2026-10-27"),
+        /系统繁忙/
+    );
+});
+
+test("龙虎榜明细多页时逐页拉全", async () => {
+    const calls = [];
+    const pages = {
+        1: [boardRow("600001", "2026-10-27", "日涨幅偏离值达7%", 3e7)],
+        2: [boardRow("000002", "2026-10-27", "日跌幅偏离值达7%", -9e7)]
+    };
+    const service = createLonghuService({
+        httpClient: {
+            async get(url, options) {
+                calls.push(options.params.pageNumber);
+                return { data: { success: true, result: { pages: 2, data: pages[options.params.pageNumber] } } };
+            }
+        },
+        requestWithRetry: fn => fn()
+    });
+    const board = await service.getBoardByDate("2026-10-27");
+    assert.deepEqual(calls, [1, 2]);
+    assert.deepEqual(board.map(item => item.symbol), ["600001", "000002"]);
 });

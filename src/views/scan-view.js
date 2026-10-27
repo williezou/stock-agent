@@ -95,7 +95,6 @@ function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
         styleLines.push(picks.length ? picks.map(pickLine).join("\n") : "无符合条件标的");
     }
     const marketLines = [
-        marketListLine("🎯 龙虎榜", longhiData.boardList, pickedSymbols, 6),
         marketListLine("📈 涨停", longhiData.riseStocks, pickedSymbols, 6),
         marketListLine("📉 跌停", longhiData.declineStocks, pickedSymbols, 6)
     ].filter(Boolean);

@@ -7,6 +7,7 @@ const BOT_COMMANDS = [
     { command: "add", description: "添加每日追踪股票" },
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
+    { command: "longhu", description: "开启/关闭龙虎榜推送" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
 ];
@@ -18,7 +19,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表";
+const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜推送";
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -42,6 +43,7 @@ const MESSAGES = {
     invalidSymbol: "股票代码无效。",
     unauthorizedCallback: "无权操作此机器人",
     operationFailed: "❌ 操作失败，请稍后重试。",
+    invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
 };
@@ -78,6 +80,12 @@ function removedText(symbol, removed) {
     return removed ? `✅ 已停止追踪 <code>${symbol}</code>。` : `未找到 <code>${symbol}</code>。`;
 }
 
+function longhuToggledText(enabled) {
+    return enabled
+        ? "✅ 已开启龙虎榜推送：交易日收盘后（约18:00-20:30）榜单发布完成即推送。发送 /longhu off 可关闭。"
+        : "已关闭龙虎榜推送，自选股收盘报告不受影响。发送 /longhu on 可重新开启。";
+}
+
 function removeChoicesMarkup(targets) {
     const inlineKeyboard = targets.map(target => [{
         text: `删除 ${target.symbol} ${target.name}`,
@@ -109,6 +117,7 @@ module.exports = {
     alreadyTrackedText,
     confirmRemoveMarkup,
     confirmRemoveText,
+    longhuToggledText,
     removeChoicesMarkup,
     removeKeyboardMarkup,
     removedText,

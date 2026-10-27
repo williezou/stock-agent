@@ -1,24 +1,26 @@
 const { config } = require("../config");
 const telegram = require("../gateways/telegram");
-const { getChinaClock } = require("../models/market/trading-calendar");
+const { getChinaClock, isWeekdayWindow, minutesOfDay } = require("../models/market/trading-calendar");
+const { alertAdmin, sentAlerts } = require("../services/admin-alert");
 const { buildReports } = require("../services/daily-report");
 const { deliverDailyClose } = require("../services/report-delivery");
+const { sendAndRecord } = require("../services/tracked-delivery");
 const { escapeHtml } = require("../views/format");
 
 // 每日收盘调度控制器：工作日北京时间15:30-18:00轮询，为每个订阅者领取并投递当日报告
 const JOB_NAME = "daily-close";
 const RETRY_DELAY_MS = 10 * 60 * 1000; // 与failDeliveryRun中的next_attempt_at间隔一致
 
+const WINDOW_START = 15 * 60 + 30;
+const FINAL_FROM = 17 * 60 + 30;
+const WINDOW_END = 18 * 60;
+
 function isRunWindow(now = new Date()) {
-    const clock = getChinaClock(now);
-    if (clock.weekday === "Sat" || clock.weekday === "Sun") return false;
-    const minutes = clock.hour * 60 + clock.minute;
-    return minutes >= 15 * 60 + 30 && minutes < 18 * 60;
+    return isWeekdayWindow(now, WINDOW_START, WINDOW_END);
 }
 
 function isFinalWindow(now = new Date()) {
-    const { hour, minute } = getChinaClock(now);
-    return hour * 60 + minute >= 17 * 60 + 30;
+    return minutesOfDay(now) >= FINAL_FROM;
 }
 
 function isTransientSkip(reason) {
@@ -34,9 +36,6 @@ function uniqueTargets(recipients) {
     }
     return [...targets.values()];
 }
-
-// 行情源告警按“日期+类型”去重，每天每类最多提醒管理员一次（进程内）
-const sentAlerts = new Set();
 
 function dataSourceAlerts(health, dateStr) {
     if (!health) return [];
@@ -54,20 +53,6 @@ function dataSourceAlerts(health, dateStr) {
         });
     }
     return alerts;
-}
-
-// 发送成功后才记为已提醒，失败的告警会在下一轮重试；同时清理往日记录，避免集合无限增长
-async function alertAdmin({ notify, adminChatId, alerted, dateStr }, { key, text }) {
-    if (!adminChatId || alerted.has(key)) return;
-    for (const existing of alerted) {
-        if (!existing.startsWith(`${dateStr}:`)) alerted.delete(existing);
-    }
-    try {
-        await notify(adminChatId, text);
-        alerted.add(key);
-    } catch (error) {
-        console.error(`⚠️ 管理员告警发送失败：${error.message}`);
-    }
 }
 
 async function runSchedulerTick(store, now = new Date(), services = {}) {
@@ -169,24 +154,14 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             return "skipped";
         }
 
-        try {
-            await deliver({ chatId, reports, date: result.date });
-        } catch (error) {
-            if (telegram.isBotBlockedError(error)) {
-                await store.deactivateSubscriber(chatId);
-                await store.completeDeliveryRun(JOB_NAME, chatId, dateStr, "blocked", "用户已阻止机器人");
-                return "deactivated";
-            }
-            await store.failDeliveryRun(JOB_NAME, chatId, dateStr, error.message);
-            return "failed";
-        }
-        await store.completeDeliveryRun(
-            JOB_NAME,
+        const outcome = await sendAndRecord(store, {
+            jobName: JOB_NAME,
             chatId,
-            dateStr,
-            "done",
-            missing.length ? `部分发送，缺少：${missing.map(target => target.symbol).join(",")}` : result.date
-        );
+            runDate: dateStr,
+            send: () => deliver({ chatId, reports, date: result.date }),
+            doneMessage: missing.length ? `部分发送，缺少：${missing.map(target => target.symbol).join(",")}` : result.date
+        });
+        if (outcome !== "delivered") return outcome;
         if (missing.length) {
             // The report is already delivered; a failed notice must not trigger a full resend.
             const names = missing.map(target => `<code>${target.symbol}</code> ${escapeHtml(target.name)}`);

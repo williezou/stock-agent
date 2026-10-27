@@ -16,7 +16,7 @@ const {
 } = require("./screening");
 const { analyzeKlines, buildTradePlan } = require("./technical-analysis");
 
-// A股扫描：股票池 → 四种风格打分 → 补充新闻 → 去重选出每类入选 → 日K技术分析 → 市场热点
+// A股扫描：股票池 → 四种风格打分 → 补充新闻 → 去重选出每类入选 → 日K技术分析 → 涨跌停统计
 const CONCURRENCY = 5;
 const REQUEST_GAP_MS = 120; // 轻微节流，避免触发限流
 const NEWS_MIN_SCORE_THRESHOLD = 4; // 只有接近阈值的才拉新闻，减少请求量
@@ -163,29 +163,25 @@ async function analyzePicks(services, picked, today) {
     ]));
 }
 
-// 龙虎榜与涨跌停统计；失败时返回空数据，不影响扫描结论
+// 涨跌停统计；失败时返回空数据，不影响扫描结论。
+// 龙虎榜要到收盘后傍晚才发布，扫描时尚未出炉，改由调度器单独推送
 async function collectMarketHeat(services) {
     try {
-        const [boardList, movers] = await Promise.all([
-            services.longhu.getLonghiBoardList(),
-            services.stockList.getMovers()
-        ]);
+        const movers = await services.stockList.getMovers();
         const [riseStocks, declineStocks] = await Promise.all([
             services.longhu.getContinuousRiseStocks(movers.gainers.rows),
             services.longhu.getContinuousDeclineStocks(movers.losers.rows)
         ]);
-        console.log(`\n🎯 龙虎榜上榜个股: ${boardList.length}`);
         console.log(`\n📈 涨停个股: ${riseStocks.length}${movers.gainers.capped ? "+" : ""}`);
         console.log(`\n📉 跌停个股: ${declineStocks.length}${movers.losers.capped ? "+" : ""}`);
         return {
-            boardList,
             riseStocks,
             declineStocks,
             riseCapped: movers.gainers.capped,
             declineCapped: movers.losers.capped
         };
     } catch (error) {
-        console.log("⚠️ 龙虎榜数据获取失败:", formatError(error));
+        console.log("⚠️ 涨跌停数据获取失败:", formatError(error));
         return {};
     }
 }

@@ -109,6 +109,18 @@ function createBotController({
         return reply(chatId, view.removedText(symbol, removed));
     }
 
+    // /longhu 切换，/longhu on|off 显式设置
+    async function setLonghuPush(chatId, argument, subscriber) {
+        const choice = argument.trim().toLowerCase();
+        let enabled;
+        if (!choice) enabled = subscriber.longhu_enabled === false;
+        else if (["on", "开", "开启"].includes(choice)) enabled = true;
+        else if (["off", "关", "关闭"].includes(choice)) enabled = false;
+        else return reply(chatId, MESSAGES.invalidLonghuArgument);
+        await store.setLonghuEnabled(chatId, enabled);
+        return reply(chatId, view.longhuToggledText(enabled));
+    }
+
     async function handleMessage(message) {
         const chatId = message.chat && message.chat.id;
         if (!chatId) return;
@@ -137,6 +149,9 @@ function createBotController({
         if (text === LEGACY_BUTTONS.LIST || isCommand(text, "list")) return showList(chatId);
         if (text === LEGACY_BUTTONS.ADD) return promptAdd(chatId);
         if (text === LEGACY_BUTTONS.REMOVE) return showRemoveChoices(chatId);
+
+        const longhuArgument = commandArgument(text, "longhu");
+        if (longhuArgument !== null) return setLonghuPush(chatId, longhuArgument, subscriber);
 
         const addArgument = commandArgument(text, "add");
         if (addArgument !== null) return addArgument ? addStock(chatId, addArgument) : promptAdd(chatId);

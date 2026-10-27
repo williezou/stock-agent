@@ -3,15 +3,19 @@ const RETRY_INTERVAL = "10 minutes";
 const STALE_RUNNING = "45 minutes";
 
 function createDeliveryRunRepository(pool) {
-    // 今天仍需投递的活跃订阅者：有自选股，且没有任务记录或任务可重领
-    async function listDueSubscribers(jobName, runDate, maxAttempts = 12) {
+    // 今天仍需投递的活跃订阅者：没有任务记录或任务可重领。
+    // audience：watchlist=有自选股的用户（收盘报告），longhu=开启龙虎榜推送的用户
+    async function listDueSubscribers(jobName, runDate, maxAttempts = 12, { audience = "watchlist" } = {}) {
+        const audienceFilter = audience === "longhu"
+            ? "AND s.longhu_enabled = TRUE"
+            : "AND EXISTS (SELECT 1 FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE)";
         const result = await pool.query(
             `SELECT s.chat_id, s.telegram_user_id, s.username, s.first_name, s.timezone
              FROM telegram_subscribers s
              LEFT JOIN daily_delivery_runs r
                 ON r.job_name = $1 AND r.chat_id = s.chat_id AND r.run_date = $2
              WHERE s.status = 'active'
-               AND EXISTS (SELECT 1 FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE)
+               ${audienceFilter}
                AND (
                     r.chat_id IS NULL
                     OR (r.attempts < $3 AND (

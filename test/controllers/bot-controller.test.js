@@ -35,6 +35,12 @@ function createMemoryStore(initial = [], registered = true) {
             subscribers.set(String(chatId), value);
             return value;
         },
+        async setLonghuEnabled(chatId, enabled) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.longhu_enabled = enabled;
+            return true;
+        },
         async deactivateSubscriber(chatId) {
             const subscriber = subscribers.get(String(chatId));
             if (!subscriber) return false;
@@ -199,4 +205,17 @@ test("未显式传入时，注册策略在创建控制器时读取当前环境�
         if (previous === undefined) delete process.env.BOT_INVITE_CODE;
         else process.env.BOT_INVITE_CODE = previous;
     }
+});
+
+test("/longhu 切换龙虎榜推送，并支持 on/off 显式设置", async () => {
+    const { controller, sent, store } = setup();
+    await controller.handleUpdate(privateMessage("/longhu"));
+    assert.equal((await store.getSubscriber(100)).longhu_enabled, false, "默认开启，首次切换为关闭");
+    assert.match(sent.at(-1).text, /已关闭龙虎榜推送/);
+    await controller.handleUpdate(privateMessage("/longhu on"));
+    assert.equal((await store.getSubscriber(100)).longhu_enabled, true);
+    assert.match(sent.at(-1).text, /已开启龙虎榜推送/);
+    await controller.handleUpdate(privateMessage("/longhu maybe"));
+    assert.match(sent.at(-1).text, /用法/);
+    assert.equal((await store.getSubscriber(100)).longhu_enabled, true);
 });

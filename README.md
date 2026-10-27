@@ -8,6 +8,7 @@ A-share stock scanner with multi-style rankings, Telegram notifications, and a m
 - News + announcement signals
 - Telegram notification with clickable links
 - Weekday 15:30 Asia/Shanghai close reports for a dynamic watchlist, initially seeded with Yili and Sciyon Wisdom
+- Dragon-Tiger list (龙虎榜) pushed separately once the exchanges finish publishing it in the evening (checked 17:30-20:30); toggle with `/longhu`
 - MA/MACD/RSI/KDJ/Bollinger, volume-price, support/resistance, catalysts, and conditional trade plans
 - Telegram delivery includes a two-stock dashboard plus 30-day candlestick/volume charts with MA5/MA20, Bollinger bands, and support/resistance overlays
 - Final daily-bar validation so holidays and incomplete intraday quotes are not pushed as closes
@@ -83,7 +84,7 @@ docker compose run --rm bot npm run bot:menu
 
 Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The GitHub Actions workflow remains available for manual runs but no longer schedules duplicate reports.
 
-Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist.
+Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist. `/longhu` (or `/longhu on|off`) toggles the evening Dragon-Tiger list push, which is on by default.
 
 ### Render deployment (optional)
 

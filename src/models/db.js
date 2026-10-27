@@ -12,6 +12,8 @@ const SCHEMA = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
+    // 订阅者可单独关闭龙虎榜推送（默认开启）
+    "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS longhu_enabled BOOLEAN NOT NULL DEFAULT TRUE",
     `CREATE TABLE IF NOT EXISTS watchlist (
         chat_id TEXT NOT NULL,
         symbol VARCHAR(6) NOT NULL,
