@@ -314,6 +314,8 @@ function drawGauge(image, x, y, width, ratio, color) {
     image.fillRect(x, y, Math.max(4, Math.min(width, width * ratio)), 12, color);
 }
 
+const CARD_LABELS = { "600887": "YILI", "002380": "SCIYON" };
+
 function drawOverviewCard(image, report, y) {
     const cardX = 48;
     const cardWidth = 984;
@@ -321,7 +323,8 @@ function drawOverviewCard(image, report, y) {
     const latest = report.analysis.latest;
     const accent = latest.changePct >= 0 ? COLORS.up : COLORS.down;
     const rows = (report.klines || []).slice(-20);
-    const label = report.meta.symbol === "600887" ? "YILI" : "SCIYON";
+    // 字体只支持ASCII，中文名无法绘制；已知股票用英文简称，其余显示代码
+    const label = CARD_LABELS[report.meta.symbol] || report.meta.symbol;
     const status = report.plan.recommendation === "观望" ? "WATCH" : "TRIAL";
 
     image.fillRect(cardX, y, cardWidth, cardHeight, COLORS.panel);
@@ -395,14 +398,14 @@ function drawOverviewCard(image, report, y) {
     image.text(chartNumber(report.analysis.resistance), 930, y + 234, 2, COLORS.text);
 }
 
-function generateOverviewChart(reports, date) {
+function generateOverviewChart(reports, date, title = "DAILY CLOSE OVERVIEW") {
     if (!Array.isArray(reports) || reports.length < 1 || reports.length > 2) {
         throw new Error("每张总览图需要一至两只股票的数据");
     }
     const footerY = reports.length === 1 ? 394 : 694;
     const height = reports.length === 1 ? 462 : 760;
     const image = new Raster(1080, height, COLORS.background);
-    image.text("DAILY CLOSE OVERVIEW", 48, 26, 3, COLORS.text);
+    image.text(title, 48, 26, 3, COLORS.text);
     image.text(date, 820, 32, 2, COLORS.muted);
     image.line(48, 68, 1032, 68, COLORS.grid, 2);
     drawOverviewCard(image, reports[0], 92);

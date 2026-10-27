@@ -45,6 +45,11 @@ function linkLine(item) {
     return url ? `${prefix}<a href="${escapeHtml(url)}">${title}</a>` : `${prefix}${title}`;
 }
 
+const STOCK_FOCUS = {
+    "600887": "关注三季报利润修复、减值与回购进度",
+    "002380": "关注工业AI/机器人兑现与高换手风险"
+};
+
 function formatStockCaption(report, date) {
     const { meta, analysis, plan, news = [], announcements = [] } = report;
     const { latest, ma, macd, rsi, kdj, bollinger } = analysis;
@@ -52,14 +57,15 @@ function formatStockCaption(report, date) {
     const catalystLine = catalyst
         ? `📰 ${linkLine(catalyst)}`
         : "📰 暂无可核验的新公告或催化";
-    const focus = meta.symbol === "600887"
-        ? "关注三季报利润修复、减值与回购进度"
-        : "关注工业AI/机器人兑现与高换手风险";
+    const plainCatalystLine = catalyst
+        ? `📰 ${escapeHtml(shortText(catalyst.title))}`
+        : catalystLine;
+    const focus = STOCK_FOCUS[meta.symbol] || "关注量能能否延续与板块情绪变化";
     const quoteUrl = safeHttpUrl(meta.quoteUrl);
     const sourceLine = quoteUrl
         ? `🔗 <a href="${escapeHtml(quoteUrl)}">东方财富行情</a>`
         : "🔗 行情来源：东方财富公开接口";
-    const caption = [
+    const lines = [
         `<b>${escapeHtml(meta.name)} ${meta.exchangeCode}｜${escapeHtml(date)}</b>`,
         `💰 收 ${number(latest.close)}元 ${signed(latest.changePct)}｜开/高/低 ${number(latest.open)}/${number(latest.high)}/${number(latest.low)}`,
         `📊 成交额 ${money(latest.amount)}｜换手 ${number(latest.turnover)}%｜5日量比 ${number(analysis.volumeRatio)}x`,
@@ -73,20 +79,25 @@ function formatStockCaption(report, date) {
         `🔎 ${focus}；筹码/机构成本不可可靠验证；跳空可能令实际亏损超过8%。`,
         catalystLine,
         sourceLine
-    ].join("\n");
+    ];
+    // 超长链接会撑爆1024字符限制：依次降级为纯文本标题、去掉行情链接，而不是让整次推送失败
+    let caption = lines.join("\n");
+    if (caption.length > 1024) caption = [...lines.slice(0, -2), plainCatalystLine, sourceLine].join("\n");
+    if (caption.length > 1024) caption = [...lines.slice(0, -2), plainCatalystLine].join("\n");
     if (caption.length > 1024) throw new Error("Telegram图片说明超过1024字符限制");
     return caption;
 }
 
+function formatOverviewRow(report) {
+    const { meta, analysis, plan } = report;
+    const latest = analysis.latest;
+    return `<b>${escapeHtml(meta.name)}</b>　${number(latest.close)}元 ${signed(latest.changePct)}　量比${number(analysis.volumeRatio)}x　<b>${plan.recommendation}</b>`;
+}
+
 function formatOverviewCaption(reports, date) {
-    const rows = reports.map(report => {
-        const { meta, analysis, plan } = report;
-        const latest = analysis.latest;
-        return `<b>${escapeHtml(meta.name)}</b>　${number(latest.close)}元 ${signed(latest.changePct)}　量比${number(analysis.volumeRatio)}x　<b>${plan.recommendation}</b>`;
-    });
     return [
         `<b>A股每日收盘图览｜${escapeHtml(date)}</b>`,
-        ...rows,
+        ...reports.map(formatOverviewRow),
         "红涨、绿跌；黄色MA5；下方为成交量；虚线为支撑与压力。"
     ].join("\n");
 }
@@ -115,6 +126,9 @@ module.exports = {
     escapeHtml,
     formatDailyCloseDelivery,
     formatOverviewCaption,
+    formatOverviewRow,
     formatStockCaption,
-    safeHttpUrl
+    number,
+    safeHttpUrl,
+    signed
 };

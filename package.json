@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "scan": "node scanner.js",
+    "scan:dry-run": "node scanner.js --dry-run",
     "bot": "node bot-server.js",
     "bot:poll": "node bot-poller.js",
     "bot:menu": "node scripts/send-menu.js",

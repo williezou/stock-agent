@@ -113,8 +113,7 @@ function createLonghuService({ httpClient, requestWithRetry, DEBUG }) {
                     change: s.change,
                     prevClose: s.prevClose
                 }))
-                .sort((a, b) => b.changePct - a.changePct)
-                .slice(0, 20);
+                .sort((a, b) => b.changePct - a.changePct);
 
             if (DEBUG) {
                 console.log(`🧪 筛选涨停: ${limitUp.length} 只`);
@@ -146,8 +145,7 @@ function createLonghuService({ httpClient, requestWithRetry, DEBUG }) {
                     change: s.change,
                     prevClose: s.prevClose
                 }))
-                .sort((a, b) => a.changePct - b.changePct)
-                .slice(0, 20);
+                .sort((a, b) => a.changePct - b.changePct);
 
             if (DEBUG) {
                 console.log(`🧪 筛选跌停: ${limitDown.length} 只`);

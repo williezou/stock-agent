@@ -1,122 +1,159 @@
-function escapeHtml(text) {
-    return String(text || "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+const { escapeHtml, formatOverviewRow, formatStockCaption, number, signed } = require("./daily-format");
+
+const STYLE_ORDER = ["intraday", "short", "swing", "mid"];
+const STYLE_LABELS = {
+    intraday: "日内",
+    short: "短线",
+    swing: "波段",
+    mid: "中线"
+};
+// 图表字体仅含部分ASCII字母（无J/Q），标题需避开这些字符
+const STYLE_CHART_TITLES = {
+    intraday: "INTRADAY PICKS",
+    short: "SHORT TERM PICKS",
+    swing: "SWING PICKS",
+    mid: "MID TERM PICKS"
+};
+const SIGNAL_RANK = {
+    "条件性试仓": 2,
+    "等待企稳后试仓": 1
+};
+const TELEGRAM_TEXT_LIMIT = 4096;
+
+function isActionable(report) {
+    return Boolean(report && SIGNAL_RANK[report.plan.recommendation]);
 }
 
-function truncate(text, max) {
-    if (!text) return "";
-    const t = String(text).trim();
-    return t.length > max ? t.slice(0, max - 1) + "…" : t;
+function rankActionable(reports) {
+    return reports
+        .filter(isActionable)
+        .sort((a, b) =>
+            SIGNAL_RANK[b.plan.recommendation] - SIGNAL_RANK[a.plan.recommendation] ||
+            b.plan.rewardRisk - a.plan.rewardRisk
+        );
 }
 
-function formatTelegramMessage({ resultsByStyle, now, newsService, longhiData = {} }) {
-    const styles = ["intraday", "short", "swing", "mid"];
-    const styleLabels = {
-        intraday: "日内",
-        short: "短线",
-        swing: "波段",
-        mid: "中线"
-    };
-    const NEWS_CONTENT_MAX_CHARS = 120;
-
-    const sections = [];
-    for (const style of styles) {
-        const top5 = resultsByStyle[style] || [];
-        const symbolLine = top5.length
-            ? `代码: <code>${top5.map(r => r.symbol).join(" ")}</code>`
-            : "";
-        const lines = top5.map((r, i) => {
-            const scoreText = Number.isFinite(r.score) ? r.score.toFixed(1) : r.score;
-            const base = `${i + 1}. <code>${r.symbol}</code> ${r.name || ""} | 分数:${scoreText} | 涨幅:${r.gap} | 量:${r.volume} | 新闻:${r.newsCount || 0} | 公告:${r.annCount || 0}`;
-            if (style !== "mid") return base;
-            if (!r.buy) return `${base} | 买点: 无`;
-            const buy = `买点:${r.buy.entry.toFixed(2)} 止损:${r.buy.stop.toFixed(2)} 量比:${r.buy.volRatio.toFixed(2)}`;
-            return `${base} | ${buy}`;
-        });
-        const newsLines = top5.flatMap(r => {
-            if (!r.news || r.news.length === 0) return [];
-            const head = `${r.symbol} ${r.name || ""} 新闻:`;
-            const items = r.news.map(n => {
-                const title = escapeHtml(n.title || "");
-                const url = n.url || "";
-                const content = truncate(n.content || "", NEWS_CONTENT_MAX_CHARS);
-                const contentText = content ? `（${escapeHtml(content)}）` : "（无摘要）";
-                const source = escapeHtml(n.source || newsService.sourceFromUrl(url) || "来源未知");
-                const prefix = `［${source}］`;
-                return url ? `- ${prefix} <a href="${url}">${title}</a> ${contentText}` : `- ${prefix} ${title} ${contentText}`;
-            });
-            return [head, ...items];
-        });
-        const annLines = top5.flatMap(r => {
-            if (!r.announcements || r.announcements.length === 0) return [];
-            const head = `${r.symbol} ${r.name || ""} 公告:`;
-            const items = r.announcements.map(a => {
-                const title = escapeHtml(a.title || "");
-                const url = a.url || "";
-                return url ? `- <a href="${url}">${title}</a>` : `- ${title}`;
-            });
-            return [head, ...items];
-        });
-
-        const block =
-            `<b>${styleLabels[style]} Top5</b>\n` +
-            (lines.length ? lines.join("\n") : "无符合条件标的") +
-            (symbolLine ? `\n${symbolLine}` : "") +
-            (newsLines.length ? `\n<b>新闻详情</b>\n${newsLines.join("\n")}` : "") +
-            (annLines.length ? `\n<b>公告详情</b>\n${annLines.join("\n")}` : "");
-        sections.push(block);
-    }
-
-    // =====================
-    // 龙虎榜数据格式化
-    // =====================
-    const longhiSections = [];
-
-    // 龙虎榜上榜个股
-    if (longhiData.boardList && longhiData.boardList.length > 0) {
-        const boardLines = longhiData.boardList.slice(0, 15).map((item, i) => {
-            const changeText = item.changePct >= 0 
-                ? `<code>+${(item.changePct).toFixed(2)}%</code>` 
-                : `<code>${(item.changePct).toFixed(2)}%</code>`;
-            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 涨跌:${changeText} | 换手:${(item.turnoverRate).toFixed(2)}% | ${item.boardType || ""}`;
-        });
-        const boardSection = 
-            `<b>🎯 龙虎榜上榜 (${longhiData.boardList.length})</b>\n` +
-            (boardLines.length ? boardLines.join("\n") : "无数据");
-        longhiSections.push(boardSection);
-    }
-
-    // 涨停个股
-    if (longhiData.riseStocks && longhiData.riseStocks.length > 0) {
-        const riseLines = longhiData.riseStocks.slice(0, 10).map((item, i) => {
-            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 涨幅:${(item.changePct).toFixed(2)}%`;
-        });
-        const riseSection =
-            `<b>📈 涨停 (${longhiData.riseStocks.length})</b>\n` +
-            (riseLines.length ? riseLines.join("\n") : "无数据");
-        longhiSections.push(riseSection);
-    }
-
-    // 跌停个股
-    if (longhiData.declineStocks && longhiData.declineStocks.length > 0) {
-        const declineLines = longhiData.declineStocks.slice(0, 10).map((item, i) => {
-            return `${i + 1}. <code>${item.symbol}</code> ${item.name || ""} | 价格:${item.price.toFixed(2)} | 跌幅:${(item.changePct).toFixed(2)}%`;
-        });
-        const declineSection =
-            `<b>📉 跌停 (${longhiData.declineStocks.length})</b>\n` +
-            (declineLines.length ? declineLines.join("\n") : "无数据");
-        longhiSections.push(declineSection);
-    }
-
-    const longhiBlock = longhiSections.length > 0 
-        ? `\n\n${longhiSections.join("\n\n")}`
-        : "";
-
-    return `<b>A股扫描</b>\n${now}\n\n${sections.join("\n\n")}${longhiBlock}`;
+function marketTone(longhiData) {
+    const up = (longhiData.riseStocks || []).length;
+    const down = (longhiData.declineStocks || []).length;
+    // 涨跌停榜单按页拉取有上限，触顶时只能给出下限
+    const upText = `${longhiData.riseCapped ? "≥" : ""}${up}`;
+    const downText = `${longhiData.declineCapped ? "≥" : ""}${down}`;
+    if (!up && !down) return null;
+    let tone = "中性";
+    if (up >= Math.max(down, 1) * 3) tone = "偏强，可适度参与";
+    else if (down >= up) tone = "偏弱，宜轻仓防守";
+    return `涨停${upText}家／跌停${downText}家，情绪${tone}`;
 }
 
-module.exports = { formatTelegramMessage };
+function adviceLines(picksByStyle, longhiData, withReasons = true) {
+    const reports = STYLE_ORDER.flatMap(style => picksByStyle[style] || []).map(pick => pick.report).filter(Boolean);
+    const actionable = rankActionable(reports);
+    const lines = ["<b>🧭 今日结论</b>"];
+    const tone = marketTone(longhiData);
+    if (tone) lines.push(`市场：${tone}`);
+    if (!actionable.length) {
+        lines.push(reports.length
+            ? `入选${reports.length}只均未出现入场信号，建议观望、控制仓位，等待回踩企稳或放量突破。`
+            : "今日没有符合条件的标的，建议观望。");
+        return lines;
+    }
+    lines.push(`可操作${actionable.length}只（按信号强度、盈亏比排序）：`);
+    actionable.forEach((report, index) => {
+        const { meta, plan } = report;
+        lines.push(
+            `${index + 1}. <code>${meta.symbol}</code> ${escapeHtml(meta.name)}［${STYLE_LABELS[report.style]}］<b>${plan.recommendation}</b>`,
+            `　回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}｜止损 ${number(plan.stop)}｜目标 ${number(plan.target)}｜盈亏比 ${number(plan.rewardRisk)}:1`,
+            ...(withReasons ? [`　${escapeHtml(plan.reason)}`] : [])
+        );
+    });
+    const watching = reports.length - actionable.length;
+    if (watching) lines.push(`其余${watching}只暂以观望为主。`);
+    return lines;
+}
+
+function pickLine(pick, index) {
+    const { item, report } = pick;
+    const head = `${index + 1}. <code>${item.symbol}</code> ${escapeHtml(item.name)}`;
+    if (!report) return `${head} ${item.gap}｜K线数据不足，未生成建议`;
+    const { analysis, plan } = report;
+    const heat = plan.overheated ? "｜⚠️偏热" : "";
+    return `${head} ${signed(analysis.latest.changePct)}｜量比${number(analysis.volumeRatio)}x｜<b>${plan.recommendation}</b>${heat}`;
+}
+
+function marketListLine(title, items, pickedSymbols, limit) {
+    const rest = (items || []).filter(item => !pickedSymbols.has(item.symbol));
+    if (!rest.length) return null;
+    const names = rest.slice(0, limit).map(item => `${escapeHtml(item.name)}${signed(item.changePct)}`);
+    const more = rest.length > limit ? ` 等${rest.length}只` : "";
+    return `${title}：${names.join("、")}${more}`;
+}
+
+function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
+    const pickedSymbols = new Set(
+        STYLE_ORDER.flatMap(style => picksByStyle[style] || []).map(pick => pick.item.symbol)
+    );
+    const styleLines = ["<b>📋 分类入选</b>"];
+    for (const style of STYLE_ORDER) {
+        const picks = picksByStyle[style] || [];
+        styleLines.push(`<b>${STYLE_LABELS[style]}</b>`);
+        styleLines.push(picks.length ? picks.map(pickLine).join("\n") : "无符合条件标的");
+    }
+    const marketLines = [
+        marketListLine("🎯 龙虎榜", longhiData.boardList, pickedSymbols, 6),
+        marketListLine("📈 涨停", longhiData.riseStocks, pickedSymbols, 6),
+        marketListLine("📉 跌停", longhiData.declineStocks, pickedSymbols, 6)
+    ].filter(Boolean);
+    const build = ({ withReasons, withMarket }) => [
+        `<b>A股扫描</b>｜${escapeHtml(now)}`,
+        adviceLines(picksByStyle, longhiData, withReasons).join("\n"),
+        styleLines.join("\n"),
+        ...(withMarket && marketLines.length ? [["<b>🔥 市场热点（不含已入选）</b>", ...marketLines].join("\n")] : []),
+        "<i>以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</i>"
+    ].join("\n\n");
+
+    // 超长时按整段舍弃次要内容，避免截断HTML标签导致Telegram解析失败
+    for (const options of [
+        { withReasons: true, withMarket: true },
+        { withReasons: true, withMarket: false },
+        { withReasons: false, withMarket: false }
+    ]) {
+        const text = build(options);
+        if (text.length <= TELEGRAM_TEXT_LIMIT) return text;
+    }
+    throw new Error("扫描结论超过Telegram 4096字符限制");
+}
+
+function formatScanOverviewCaption(style, reports, date) {
+    return [`<b>${STYLE_LABELS[style]}入选｜${escapeHtml(date)}</b>`, ...reports.map(formatOverviewRow)].join("\n");
+}
+
+function formatScanDelivery({ picksByStyle, date }) {
+    const overviews = [];
+    for (const style of STYLE_ORDER) {
+        const reports = (picksByStyle[style] || []).map(pick => pick.report).filter(Boolean);
+        if (!reports.length) continue;
+        overviews.push({
+            style,
+            title: STYLE_CHART_TITLES[style],
+            caption: formatScanOverviewCaption(style, reports, date),
+            filename: `scan-${style}-${date}.png`,
+            reports
+        });
+    }
+    const reports = STYLE_ORDER.flatMap(style => picksByStyle[style] || []).map(pick => pick.report).filter(Boolean);
+    const stocks = rankActionable(reports).map(report => ({
+        caption: formatStockCaption(report, date),
+        filename: `scan-${report.meta.symbol}-${date}.png`,
+        report
+    }));
+    return { overviews, stocks };
+}
+
+module.exports = {
+    STYLE_LABELS,
+    STYLE_ORDER,
+    formatScanDelivery,
+    formatScanSummary,
+    rankActionable
+};

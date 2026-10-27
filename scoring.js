@@ -119,4 +119,31 @@ function scoreByStyleRelaxed(style, features, news, announcements) {
     return score;
 }
 
-module.exports = { computeFeatures, scoreByStyle, scoreByStyleRelaxed };
+// 严格去重：每只股票只出现在一个风格中，优先归入其得分最高的风格，不足时宁缺毋滥
+function pickByStyle(fullLists, styles, perStyle) {
+    const best = new Map();
+    for (const style of styles) {
+        for (const item of fullLists[style] || []) {
+            const prev = best.get(item.symbol);
+            if (!prev || item.score > prev.score) best.set(item.symbol, { style, score: item.score });
+        }
+    }
+    const assigned = new Set();
+    const picks = Object.fromEntries(styles.map(style => [style, []]));
+    const take = (style, item) => {
+        if (picks[style].length >= perStyle || assigned.has(item.symbol)) return;
+        assigned.add(item.symbol);
+        picks[style].push(item);
+    };
+    for (const style of styles) {
+        for (const item of fullLists[style] || []) {
+            if (best.get(item.symbol).style === style) take(style, item);
+        }
+    }
+    for (const style of styles) {
+        for (const item of fullLists[style] || []) take(style, item);
+    }
+    return picks;
+}
+
+module.exports = { computeFeatures, pickByStyle, scoreByStyle, scoreByStyleRelaxed };
