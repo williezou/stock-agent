@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "scan": "node scanner.js",
+    "daily-close": "node daily-close.js",
+    "daily-close:dry-run": "node daily-close.js --dry-run",
+    "test": "node --test test/*.test.js"
   },
   "keywords": [],
   "author": "",

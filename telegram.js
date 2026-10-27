@@ -53,4 +53,40 @@ async function sendTelegram(text) {
     );
 }
 
-module.exports = { sendTelegram };
+function multipartField(boundary, name, value) {
+    return Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${name}"\r\n\r\n` +
+        `${value}\r\n`
+    );
+}
+
+async function sendTelegramPhoto(photo, caption = "", filename = "chart.png") {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+    if (!Buffer.isBuffer(photo)) throw new TypeError("photo必须是PNG Buffer");
+    if (caption.length > 1024) throw new Error("Telegram图片说明超过1024字符限制");
+    const safeFilename = String(filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const boundary = `----stock-agent-${Date.now().toString(16)}`;
+    const body = Buffer.concat([
+        multipartField(boundary, "chat_id", TELEGRAM_CHAT_ID),
+        multipartField(boundary, "caption", caption),
+        multipartField(boundary, "parse_mode", "HTML"),
+        Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="photo"; filename="${safeFilename}"\r\n` +
+            "Content-Type: image/png\r\n\r\n"
+        ),
+        photo,
+        Buffer.from(`\r\n--${boundary}--\r\n`)
+    ]);
+    const url = `${TELEGRAM_API_BASE}/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
+    await requestWithRetry(() => client.post(url, body, {
+        headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            "Content-Length": body.length
+        },
+        maxBodyLength: Infinity
+    }));
+}
+
+module.exports = { sendTelegram, sendTelegramPhoto };

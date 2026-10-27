@@ -1,0 +1,25 @@
+name: 伊利与科远智慧每日收盘 Telegram
+
+on:
+  schedule:
+    # UTC 07:30 = 北京时间 15:30；脚本会再用当日完整日K判断是否为A股交易日。
+    - cron: "30 7 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  daily-close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: node daily-close.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}

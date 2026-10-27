@@ -1,8 +1,7 @@
 const HOLIDAY_API = "https://date.nager.at/api/v3/PublicHolidays";
 const CN_TIMEZONE = "Asia/Shanghai";
 
-function getChinaToday() {
-    const now = new Date();
+function getChinaToday(now = new Date()) {
     const dateStr = new Intl.DateTimeFormat("en-CA", {
         timeZone: CN_TIMEZONE,
         year: "numeric",
@@ -14,6 +13,28 @@ function getChinaToday() {
         weekday: "short"
     }).format(now);
     return { dateStr, weekday };
+}
+
+function getChinaClock(now = new Date()) {
+    const { dateStr, weekday } = getChinaToday(now);
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: CN_TIMEZONE,
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit"
+    }).formatToParts(now);
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return {
+        dateStr,
+        weekday,
+        hour: Number(values.hour),
+        minute: Number(values.minute)
+    };
+}
+
+function isAfterChinaClose(now = new Date(), closeHour = 15, closeMinute = 15) {
+    const { hour, minute } = getChinaClock(now);
+    return hour > closeHour || (hour === closeHour && minute >= closeMinute);
 }
 
 async function fetchChinaHolidays(httpClient, requestWithRetry, year) {
@@ -54,4 +75,12 @@ function chinaDateString() {
     return getChinaToday().dateStr;
 }
 
-module.exports = { isTradingDay, nowChinaString, chinaDateString };
+module.exports = {
+    CN_TIMEZONE,
+    chinaDateString,
+    getChinaClock,
+    getChinaToday,
+    isAfterChinaClose,
+    isTradingDay,
+    nowChinaString
+};
