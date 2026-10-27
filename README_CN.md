@@ -37,9 +37,23 @@ HTTPS_PROXY=  # 可选
 NEWSNOW_BASE_URL= # 可选，默认 https://newsnow.busiyi.world
 ```
 
+## 目录结构
+```
+bin/               入口脚本（bot-poller、bot-server、scheduler、scan、daily-close 等）
+src/config.js      集中读取全部环境变量
+src/lib/           HTTP客户端/代理、重试、并发池、限流
+src/gateways/      Telegram Bot API 客户端
+src/models/        M：数据库仓储、股票代码、行情数据（东方财富→同花顺→腾讯）、新闻、龙虎榜、交易日历
+src/services/      业务逻辑：技术分析、选股、每日收盘报告、A股扫描、报告推送、机器人配置
+src/views/         V：Telegram消息文案、机器人回复、PNG图表
+src/controllers/   C：机器人命令、Webhook HTTP、每日投递调度
+test/              与 src/ 结构对应
+```
+
 ## 运行
 ```
-node scanner.js
+npm run scan            # A股扫描，推送给 TELEGRAM_CHAT_ID
+npm run scan:dry-run    # 只输出到终端
 ```
 
 每日收盘任务试运行（只输出到终端，不发送 Telegram）：

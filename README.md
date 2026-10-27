@@ -39,9 +39,23 @@ HTTPS_PROXY=  # optional
 
 > `FINNHUB_API_KEY` is no longer used but can be kept empty.
 
+## Project structure
+```
+bin/               entry points (bot-poller, bot-server, scheduler, scan, daily-close, ...)
+src/config.js      all environment variables
+src/lib/           HTTP client/proxy, retry, concurrency pool, rate limiter
+src/gateways/      Telegram Bot API client
+src/models/        data: Postgres repositories, stock codes, market data (Eastmoney → Tonghuashun → Tencent), news, Dragon-Tiger list, trading calendar
+src/services/      business logic: technical analysis, screening, daily report, scan, report delivery, bot setup
+src/views/         presentation: Telegram message text, bot replies, PNG charts
+src/controllers/   input handling: bot commands, webhook HTTP, daily delivery scheduler
+test/              mirrors src/
+```
+
 ## Run
 ```
-node scanner.js
+npm run scan            # A-share scan, sends to TELEGRAM_CHAT_ID
+npm run scan:dry-run    # print only
 ```
 
 Preview the daily close report without sending Telegram messages:
