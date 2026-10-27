@@ -20,10 +20,10 @@ function createMemoryStore(initial = [], registered = true) {
         async getSession(chatId) { return sessions.get(String(chatId)) || null; },
         async clearSession(chatId) { sessions.delete(String(chatId)); },
         async getSubscriber(chatId) { return subscribers.get(String(chatId)) || null; },
-        async listActiveSubscribers() {
-            return [...subscribers.values()].filter(item => item.status === "active");
-        },
-        async registerSubscriber({ chatId, userId, username, firstName }) {
+        async registerSubscriber({ chatId, userId, username, firstName, maxActive = 0 }) {
+            const current = subscribers.get(String(chatId));
+            const active = [...subscribers.values()].filter(item => item.status === "active").length;
+            if (maxActive > 0 && current?.status !== "active" && active >= maxActive) return null;
             const value = {
                 chat_id: String(chatId),
                 telegram_user_id: userId ? String(userId) : null,
@@ -56,6 +56,9 @@ function setup(initial = [], options = {}) {
         async sendMessage(chatId, text, sendOptions) { sent.push({ chatId, text, options: sendOptions }); },
         async answerCallback(id, answerOptions) { answered.push({ id, options: answerOptions }); },
         inviteCode: options.inviteCode || "",
+        openRegistration: options.openRegistration ?? true,
+        adminChatId: options.adminChatId || "1",
+        maxSubscribers: options.maxSubscribers ?? 50,
         maxStocks: 10
     });
     return { answered, controller, sent, store };
@@ -130,9 +133,41 @@ test("/stop暂停订阅但保留自选股", async () => {
     assert.equal((await store.list(100)).length, 1);
 });
 
-test("群聊不开放个人自选股操作", async () => {
+test("群聊消息被静默忽略", async () => {
     const { controller, sent, store } = setup();
     await controller.handleUpdate({ message: { chat: { id: -100, type: "group" }, from: { id: 200 }, text: "/start" } });
     assert.equal(await store.getSubscriber(-100), null);
-    assert.match(sent.at(-1).text, /仅支持私聊/);
+    assert.equal(sent.length, 0);
+});
+
+test("未配置邀请码且未开放注册时仅管理员可注册", async () => {
+    const { controller, sent, store } = setup([], { registered: false, openRegistration: false, adminChatId: "300" });
+    await controller.handleUpdate(privateMessage("/start"));
+    assert.equal(await store.getSubscriber(100), null);
+    assert.match(sent.at(-1).text, /暂未开放注册/);
+    await controller.handleUpdate(privateMessage("/start", 300));
+    assert.equal((await store.getSubscriber(300)).status, "active");
+});
+
+test("未注册用户的普通文本不回复", async () => {
+    const { controller, sent } = setup([], { registered: false });
+    await controller.handleUpdate(privateMessage("hello"));
+    assert.equal(sent.length, 0);
+});
+
+test("名额已满时已停用用户也不能重新启用", async () => {
+    const { controller, sent, store } = setup([], { maxSubscribers: 1 });
+    await controller.handleUpdate(privateMessage("/stop"));
+    await controller.handleUpdate(privateMessage("/start", 400));
+    assert.equal((await store.getSubscriber(400)).status, "active");
+    await controller.handleUpdate(privateMessage("/start"));
+    assert.equal((await store.getSubscriber(100)).status, "inactive");
+    assert.match(sent.at(-1).text, /名额已满/);
+});
+
+test("已停用用户点击菜单按钮仍会收到恢复提示", async () => {
+    const { controller, sent } = setup();
+    await controller.handleUpdate(privateMessage("/stop"));
+    await controller.handleUpdate(privateMessage(BUTTONS.LIST));
+    assert.match(sent.at(-1).text, /\/start/);
 });

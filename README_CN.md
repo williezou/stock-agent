@@ -26,7 +26,8 @@ npm install
 ```
 TELEGRAM_BOT_TOKEN=你的机器人token
 TELEGRAM_CHAT_ID=管理员的chat_id
-BOT_INVITE_CODE=好友邀请码 # 可选；留空表示开放注册
+BOT_INVITE_CODE=好友邀请码 # 可选；设置后需 /start 邀请码 注册
+BOT_OPEN_REGISTRATION=false # 设为true时无需邀请码即可注册
 MAX_SUBSCRIBERS=50
 TELEGRAM_WEBHOOK_SECRET=至少16位随机字符串
 DATABASE_URL=PostgreSQL连接地址
@@ -63,7 +64,7 @@ GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北�
 - `scheduler`：工作日北京时间 15:30 后生成每日收盘报告；行情未就绪时每 10 分钟重试
 - `postgres`：持久化自选股与任务执行状态，数据库端口不会暴露到宿主机
 
-其他用户与机器人私聊后发送 `/start` 即可建立自己的订阅。如果配置了 `BOT_INVITE_CODE`，则使用 `/start 邀请码`。每个人只能看到和修改自己的自选股；相同股票会合并抓取和分析，再按用户分别生成报告。发送 `/stop` 可暂停推送但保留列表。
+其他用户与机器人私聊后建立自己的订阅：配置了 `BOT_INVITE_CODE` 时使用 `/start 邀请码`；设置 `BOT_OPEN_REGISTRATION=true` 时直接发送 `/start`；两者都未设置时仅管理员（`TELEGRAM_CHAT_ID`）可注册。管理员不受邀请码和 `MAX_SUBSCRIBERS` 限制；群聊消息会被忽略。每个人只能看到和修改自己的自选股；相同股票会合并抓取和分析，再按用户分别生成报告。发送 `/stop` 可暂停推送但保留列表。
 
 确保 `.env` 中已有 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_CHAT_ID`，然后执行：
 
@@ -92,6 +93,7 @@ docker compose down --volumes   # 同时删除本地数据库数据
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
 BOT_INVITE_CODE # 可选
+BOT_OPEN_REGISTRATION # 可选，默认false
 MAX_SUBSCRIBERS # 可选，默认50
 TELEGRAM_WEBHOOK_SECRET
 ```

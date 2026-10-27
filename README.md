@@ -27,7 +27,8 @@ Create a `.env` file:
 FINNHUB_API_KEY=
 TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
 TELEGRAM_CHAT_ID=ADMIN_CHAT_ID
-BOT_INVITE_CODE= # optional; empty enables open registration
+BOT_INVITE_CODE= # optional; required for /start when set
+BOT_OPEN_REGISTRATION=false # true allows /start without an invite code
 MAX_SUBSCRIBERS=50
 TELEGRAM_WEBHOOK_SECRET=
 DATABASE_URL=
@@ -68,7 +69,7 @@ docker compose run --rm bot npm run bot:menu
 
 Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The GitHub Actions workflow remains available for manual runs but no longer schedules duplicate reports.
 
-Each person starts a private subscription with `/start`, or `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist.
+Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist.
 
 ### Render deployment (optional)
 

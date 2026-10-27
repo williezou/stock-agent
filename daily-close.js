@@ -283,24 +283,13 @@ async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {
         return result;
     }
 
-    if (dryRun) {
-        const delivery = await deliverDailyClose({
-            chatId: process.env.TELEGRAM_CHAT_ID,
-            reports: result.reports,
-            date: result.date,
-            dryRun: true
-        });
-        return { ...result, delivery };
-    }
-
-    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
-        throw new Error("缺少TELEGRAM_BOT_TOKEN或TELEGRAM_CHAT_ID，未发送任何消息");
-    }
     const delivery = await deliverDailyClose({
         chatId: process.env.TELEGRAM_CHAT_ID,
         reports: result.reports,
-        date: result.date
+        date: result.date,
+        dryRun
     });
+    if (dryRun) return { ...result, delivery };
     console.log(`✅ 已向Telegram发送${delivery.overviews.length}张总览图和${delivery.stocks.length}张${result.date}个股图表`);
     return { ...result, delivery };
 }

@@ -31,7 +31,7 @@ test("多用户股票合并分析后按各自列表独立投递", async () => {
     const completed = [];
     const delivered = [];
     const store = {
-        async listActiveSubscribers() { return [{ chat_id: "100" }, { chat_id: "200" }]; },
+        async listDueSubscribers() { return [{ chat_id: "100" }, { chat_id: "200" }]; },
         async list(chatId) { return lists.get(String(chatId)) || []; },
         async claimDeliveryRun() { return 1; },
         async completeDeliveryRun(_job, chatId, _date, status) { completed.push({ chatId, status }); },
@@ -61,4 +61,54 @@ test("多用户股票合并分析后按各自列表独立投递", async () => {
         { chatId: "200", status: "done" }
     ]);
     assert.equal(outcome.delivered, 2);
+});
+
+function partialStore(overrides = {}) {
+    const calls = { completed: [], failed: [] };
+    const store = {
+        async listDueSubscribers() { return [{ chat_id: "100" }, { chat_id: "200" }]; },
+        async list() { return [{ symbol: "600887", name: "伊利股份" }, { symbol: "002380", name: "科远智慧" }]; },
+        async claimDeliveryRun() { return 1; },
+        async completeDeliveryRun(_job, chatId, _date, status) { calls.completed.push({ chatId, status }); },
+        async failDeliveryRun(_job, chatId) { calls.failed.push(chatId); },
+        async deactivateSubscriber() {},
+        ...overrides
+    };
+    return { calls, store };
+}
+
+const finalWindow = new Date("2026-10-27T09:40:00.000Z");
+const partialReports = {
+    async buildReports() {
+        return { skipped: false, date: "2026-10-27", reports: [{ meta: { symbol: "600887" } }] };
+    }
+};
+
+test("缺失提示发送失败不影响已完成的投递", async () => {
+    const { calls, store } = partialStore();
+    const outcome = await runSchedulerTick(store, finalWindow, {
+        ...partialReports,
+        async deliverDailyClose() {},
+        async sendTelegramTo() { throw new Error("timeout"); }
+    });
+    assert.deepEqual(calls.completed.map(item => item.status), ["done", "done"]);
+    assert.deepEqual(calls.failed, []);
+    assert.equal(outcome.delivered, 2);
+});
+
+test("单个用户的状态写入失败不会中断后续用户", async () => {
+    const { calls, store } = partialStore({
+        async completeDeliveryRun(_job, chatId, _date, status) {
+            if (chatId === "100") throw new Error("pg down");
+            calls.completed.push({ chatId, status });
+        }
+    });
+    const outcome = await runSchedulerTick(store, finalWindow, {
+        ...partialReports,
+        async deliverDailyClose() {},
+        async sendTelegramTo() {}
+    });
+    assert.deepEqual(calls.completed, [{ chatId: "200", status: "done" }]);
+    assert.equal(outcome.failed, 1);
+    assert.equal(outcome.delivered, 1);
 });

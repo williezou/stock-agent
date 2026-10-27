@@ -19,6 +19,8 @@ services:
         sync: false
       - key: BOT_INVITE_CODE
         sync: false
+      - key: BOT_OPEN_REGISTRATION
+        value: "false"
       - key: MAX_SUBSCRIBERS
         value: "50"
       - key: TELEGRAM_WEBHOOK_SECRET

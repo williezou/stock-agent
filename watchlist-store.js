@@ -72,15 +72,10 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
                 PRIMARY KEY (job_name, chat_id, run_date)
             )
         `);
-        await pool.query(`
-            INSERT INTO telegram_subscribers (chat_id, status)
-            SELECT DISTINCT chat_id, 'active' FROM watchlist
-            ON CONFLICT (chat_id) DO NOTHING
-        `);
     }
 
-    async function registerSubscriber({ chatId, userId, username, firstName }) {
-        const result = await pool.query(
+    function upsertSubscriber(db, { chatId, userId, username, firstName }) {
+        return db.query(
             `INSERT INTO telegram_subscribers
                 (chat_id, telegram_user_id, username, first_name, status, updated_at)
              VALUES ($1, $2, $3, $4, 'active', NOW())
@@ -97,8 +92,39 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
                 username || null,
                 firstName || null
             ]
-        );
-        return result.rows[0];
+        ).then(result => result.rows[0]);
+    }
+
+    async function registerSubscriber({ maxActive = 0, ...subscriber }) {
+        // Already-active users cannot change the active count, so only activations take the cap lock.
+        if (maxActive <= 0 || (await getSubscriber(subscriber.chatId))?.status === "active") {
+            return upsertSubscriber(pool, subscriber);
+        }
+        const client = await pool.connect();
+        let failure;
+        try {
+            await client.query("BEGIN");
+            // Serialize activations so concurrent /start cannot overshoot the active-subscriber cap.
+            await client.query("SELECT pg_advisory_xact_lock(hashtext('telegram_subscribers'))");
+            const count = await client.query(
+                "SELECT COUNT(*)::int AS total FROM telegram_subscribers WHERE status = 'active' AND chat_id <> $1",
+                [String(subscriber.chatId)]
+            );
+            if (count.rows[0].total >= maxActive) {
+                await client.query("ROLLBACK");
+                return null;
+            }
+            const row = await upsertSubscriber(client, subscriber);
+            await client.query("COMMIT");
+            return row;
+        } catch (error) {
+            failure = error;
+            await client.query("ROLLBACK").catch(() => {});
+            throw error;
+        } finally {
+            // Passing the error discards a possibly broken connection instead of returning it to the pool.
+            client.release(failure);
+        }
     }
 
     async function getSubscriber(chatId) {
@@ -110,12 +136,23 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
         return result.rows[0] || null;
     }
 
-    async function listActiveSubscribers() {
+    async function listDueSubscribers(jobName, runDate, maxAttempts = 12) {
         const result = await pool.query(
-            `SELECT chat_id, telegram_user_id, username, first_name, timezone
-             FROM telegram_subscribers
-             WHERE status = 'active'
-             ORDER BY created_at, chat_id`
+            `SELECT s.chat_id, s.telegram_user_id, s.username, s.first_name, s.timezone
+             FROM telegram_subscribers s
+             LEFT JOIN daily_delivery_runs r
+                ON r.job_name = $1 AND r.chat_id = s.chat_id AND r.run_date = $2
+             WHERE s.status = 'active'
+               AND EXISTS (SELECT 1 FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE)
+               AND (
+                    r.chat_id IS NULL
+                    OR (r.attempts < $3 AND (
+                        (r.status = 'failed' AND r.next_attempt_at <= NOW())
+                        OR (r.status = 'running' AND r.started_at < NOW() - INTERVAL '45 minutes')
+                    ))
+               )
+             ORDER BY s.created_at, s.chat_id`,
+            [jobName, runDate, maxAttempts]
         );
         return result.rows;
     }
@@ -267,45 +304,6 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
         await pool.query("DELETE FROM bot_sessions WHERE chat_id = $1", [String(chatId)]);
     }
 
-    async function claimScheduledRun(jobName, runDate, maxAttempts = 12) {
-        const result = await pool.query(
-            `INSERT INTO scheduled_runs
-                (job_name, run_date, status, attempts, next_attempt_at, started_at, message)
-             VALUES ($1, $2, 'running', 1, NOW(), NOW(), NULL)
-             ON CONFLICT (job_name, run_date) DO UPDATE SET
-                status = 'running',
-                attempts = scheduled_runs.attempts + 1,
-                started_at = NOW(),
-                message = NULL
-             WHERE scheduled_runs.attempts < $3
-               AND (
-                    (scheduled_runs.status = 'failed' AND scheduled_runs.next_attempt_at <= NOW())
-                    OR (scheduled_runs.status = 'running' AND scheduled_runs.started_at < NOW() - INTERVAL '45 minutes')
-               )
-             RETURNING attempts`,
-            [jobName, runDate, maxAttempts]
-        );
-        return result.rowCount > 0;
-    }
-
-    async function completeScheduledRun(jobName, runDate, status, message = "") {
-        await pool.query(
-            `UPDATE scheduled_runs
-             SET status = $3, finished_at = NOW(), message = $4
-             WHERE job_name = $1 AND run_date = $2`,
-            [jobName, runDate, status, String(message || "").slice(0, 1000)]
-        );
-    }
-
-    async function failScheduledRun(jobName, runDate, message = "") {
-        await pool.query(
-            `UPDATE scheduled_runs
-             SET status = 'failed', next_attempt_at = NOW() + INTERVAL '10 minutes', message = $3
-             WHERE job_name = $1 AND run_date = $2`,
-            [jobName, runDate, String(message || "").slice(0, 1000)]
-        );
-    }
-
     async function migrateLegacyScheduledRuns(chatId) {
         await pool.query(
             `INSERT INTO daily_delivery_runs
@@ -316,6 +314,18 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
              ON CONFLICT (job_name, chat_id, run_date) DO NOTHING`,
             [String(chatId)]
         );
+    }
+
+    // Ensures the admin exists without overriding a /stop or a blocked-bot deactivation.
+    async function bootstrapAdmin(chatId, defaultTargets) {
+        await pool.query(
+            `INSERT INTO telegram_subscribers (chat_id, status)
+             VALUES ($1, 'active')
+             ON CONFLICT (chat_id) DO NOTHING`,
+            [String(chatId)]
+        );
+        await seed(chatId, defaultTargets);
+        await migrateLegacyScheduledRuns(chatId);
     }
 
     async function claimDeliveryRun(jobName, chatId, runDate, maxAttempts = 12) {
@@ -362,22 +372,19 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
     }
 
     return {
+        bootstrapAdmin,
         claimDeliveryRun,
-        claimScheduledRun,
         clearSession,
         close,
         completeDeliveryRun,
-        completeScheduledRun,
         deactivateSubscriber,
         failDeliveryRun,
-        failScheduledRun,
         get,
         getSubscriber,
         getSession,
         initialize,
         list,
-        listActiveSubscribers,
-        migrateLegacyScheduledRuns,
+        listDueSubscribers,
         registerSubscriber,
         remove,
         seed,

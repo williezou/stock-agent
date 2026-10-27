@@ -48,16 +48,15 @@ async function startPolling() {
     requireConfiguration();
     const store = createWatchlistStore();
     await store.initialize();
-    await store.registerSubscriber({ chatId: ADMIN_CHAT_ID });
-    await store.seed(ADMIN_CHAT_ID, DEFAULT_TARGETS);
-    await store.migrateLegacyScheduledRuns(ADMIN_CHAT_ID);
+    await store.bootstrapAdmin(ADMIN_CHAT_ID, DEFAULT_TARGETS);
     const marketService = createMarketService({ httpClient: createHttpClient(), requestWithRetry });
     const controller = createBotController({
         store,
         marketService,
         sendMessage: sendTelegramTo,
         answerCallback: answerCallbackQuery,
-        inviteCode: process.env.BOT_INVITE_CODE || ""
+        inviteCode: process.env.BOT_INVITE_CODE || "",
+        adminChatId: ADMIN_CHAT_ID
     });
 
     await telegramRequest("deleteWebhook", { drop_pending_updates: false });

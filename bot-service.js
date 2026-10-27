@@ -30,12 +30,18 @@ function createBotController({
     sendMessage,
     answerCallback,
     inviteCode = process.env.BOT_INVITE_CODE || "",
+    openRegistration = process.env.BOT_OPEN_REGISTRATION === "true",
+    adminChatId = process.env.TELEGRAM_CHAT_ID,
     privateOnly = true,
     maxSubscribers = Number(process.env.MAX_SUBSCRIBERS || 50),
     maxStocks = 10
 }) {
     function isPrivateChat(chat) {
         return !privateOnly || !chat?.type || chat.type === "private";
+    }
+
+    function isAdmin(chatId) {
+        return Boolean(adminChatId) && String(chatId) === String(adminChatId);
     }
 
     async function isActiveSubscriber(chatId) {
@@ -45,22 +51,24 @@ function createBotController({
 
     async function register(message, suppliedCode) {
         const chatId = message.chat.id;
+        const admin = isAdmin(chatId);
         const existing = await store.getSubscriber(chatId);
-        if (inviteCode && !existing && suppliedCode !== inviteCode) {
-            return sendMessage(chatId, "需要有效邀请码才能启用每日股票追踪。\n请输入：<code>/start 邀请码</code>");
-        }
-        if (!existing && maxSubscribers > 0) {
-            const activeSubscribers = await store.listActiveSubscribers();
-            if (activeSubscribers.length >= maxSubscribers) {
-                return sendMessage(chatId, "当前订阅名额已满，请联系机器人管理员。");
+        if (!admin && !existing) {
+            if (inviteCode && suppliedCode !== inviteCode) {
+                return sendMessage(chatId, "需要有效邀请码才能启用每日股票追踪。\n请输入：<code>/start 邀请码</code>");
+            }
+            if (!inviteCode && !openRegistration) {
+                return sendMessage(chatId, "本机器人暂未开放注册，请联系机器人管理员。");
             }
         }
-        await store.registerSubscriber({
+        const subscriber = await store.registerSubscriber({
             chatId,
             userId: message.from?.id,
             username: message.from?.username,
-            firstName: message.from?.first_name
+            firstName: message.from?.first_name,
+            maxActive: admin ? 0 : maxSubscribers
         });
+        if (!subscriber) return sendMessage(chatId, "当前订阅名额已满，请联系机器人管理员。");
         return sendMenu(chatId, "✅ 订阅已启用。你的自选股与其他用户完全独立。\n请先添加需要每日追踪的股票。");
     }
 
@@ -131,13 +139,15 @@ function createBotController({
         const chatId = message.chat && message.chat.id;
         if (!chatId) return;
         const text = String(message.text || "").trim();
-        if (!isPrivateChat(message.chat)) {
-            return sendMessage(chatId, "为保护每个人的自选股隐私，本机器人目前仅支持私聊使用。");
-        }
+        // Group chats are ignored silently so a busy group cannot exhaust the shared Telegram rate limit.
+        if (!isPrivateChat(message.chat)) return;
 
         const startArgument = commandArgument(text, "start");
         if (startArgument !== null) return register(message, startArgument.trim());
-        if (!await isActiveSubscriber(chatId)) {
+        const subscriber = await store.getSubscriber(chatId);
+        if (subscriber?.status !== "active") {
+            // Strangers' chatter is ignored; known (paused or blocked-then-unblocked) users still get a hint.
+            if (!subscriber && !text.startsWith("/")) return;
             return sendMessage(chatId, inviteCode
                 ? "请使用 <code>/start 邀请码</code> 完成注册。"
                 : "请先发送 /start 启用每日股票追踪。");
