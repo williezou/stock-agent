@@ -11,7 +11,7 @@
 - 报告包含 MA、MACD、RSI、KDJ、布林带、量价、支撑压力、公告/催化与条件性交易计划
 - Telegram 推送包含双股仪表盘，以及近 30 日 K 线、MA5/MA20、布林带、支撑压力和成交量图
 - 用当日完整日 K 线二次确认交易日，非交易日不推送，避免把盘中价当收盘价
-- Telegram 菜单支持添加、删除和查看每日追踪股票，最多 10 只
+- Telegram 支持多人私聊订阅；每个人可独立添加、删除和查看最多 10 只追踪股票
 
 ## 环境要求
 - Node.js 18+
@@ -25,8 +25,9 @@ npm install
 复制 `.env.example` 为 `.env`，并填写：
 ```
 TELEGRAM_BOT_TOKEN=你的机器人token
-TELEGRAM_CHAT_ID=你的chat_id
-TELEGRAM_ALLOWED_USER_ID=允许操作菜单的Telegram用户ID # 可选，群聊时建议设置
+TELEGRAM_CHAT_ID=管理员的chat_id
+BOT_INVITE_CODE=好友邀请码 # 可选；留空表示开放注册
+MAX_SUBSCRIBERS=50
 TELEGRAM_WEBHOOK_SECRET=至少16位随机字符串
 DATABASE_URL=PostgreSQL连接地址
 PUBLIC_BASE_URL=https://你的服务域名
@@ -62,6 +63,8 @@ GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北�
 - `scheduler`：工作日北京时间 15:30 后生成每日收盘报告；行情未就绪时每 10 分钟重试
 - `postgres`：持久化自选股与任务执行状态，数据库端口不会暴露到宿主机
 
+其他用户与机器人私聊后发送 `/start` 即可建立自己的订阅。如果配置了 `BOT_INVITE_CODE`，则使用 `/start 邀请码`。每个人只能看到和修改自己的自选股；相同股票会合并抓取和分析，再按用户分别生成报告。发送 `/stop` 可暂停推送但保留列表。
+
 确保 `.env` 中已有 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_CHAT_ID`，然后执行：
 
 ```bash
@@ -88,7 +91,8 @@ docker compose down --volumes   # 同时删除本地数据库数据
 ```
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
-TELEGRAM_ALLOWED_USER_ID # 可选
+BOT_INVITE_CODE # 可选
+MAX_SUBSCRIBERS # 可选，默认50
 TELEGRAM_WEBHOOK_SECRET
 ```
 
@@ -108,6 +112,7 @@ npm run telegram:configure
 - `➖ 删除股票` 或 `/remove 600519`
 - `📋 追踪列表` 或 `/list`
 - `/cancel` 取消当前输入
+- `/stop` 暂停个人每日推送，`/start` 可恢复
 
 Render 免费 Web Service 会在空闲后休眠，免费 PostgreSQL 也只适合测试；长期稳定使用应选择持久化且不休眠的方案。
 

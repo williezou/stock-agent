@@ -1,11 +1,15 @@
 require("dotenv").config();
 
 const { getChinaClock } = require("./calendar");
-const { runDailyClose } = require("./daily-close");
+const { buildReports, deliverDailyClose } = require("./daily-close");
+const { escapeHtml } = require("./daily-format");
+const { DEFAULT_TARGETS } = require("./stocks");
+const { sendTelegramTo } = require("./telegram");
 const { createWatchlistStore } = require("./watchlist-store");
 
 const CHECK_INTERVAL_MS = Number(process.env.SCHEDULER_CHECK_INTERVAL_MS || 30000);
 const MAX_ATTEMPTS = Number(process.env.DAILY_CLOSE_MAX_ATTEMPTS || 12);
+const JOB_NAME = "daily-close";
 
 function isRunWindow(now = new Date()) {
     const clock = getChinaClock(now);
@@ -14,36 +18,138 @@ function isRunWindow(now = new Date()) {
     return minutes >= 15 * 60 + 30 && minutes < 18 * 60;
 }
 
+function isFinalWindow(now = new Date()) {
+    const { hour, minute } = getChinaClock(now);
+    return hour * 60 + minute >= 17 * 60 + 30;
+}
+
 function isTransientSkip(reason) {
     return /没有完整日K|数据未就绪/.test(String(reason || ""));
 }
 
-async function runSchedulerTick(store, now = new Date()) {
-    if (!isRunWindow(now)) return { action: "outside-window" };
-    const { dateStr } = getChinaClock(now);
-    const claimed = await store.claimScheduledRun("daily-close", dateStr, MAX_ATTEMPTS);
-    if (!claimed) return { action: "not-claimed" };
-
-    try {
-        const result = await runDailyClose({ dryRun: false });
-        if (result.skipped && isTransientSkip(result.reason)) {
-            await store.failScheduledRun("daily-close", dateStr, result.reason);
-            return { action: "retry", reason: result.reason };
+function uniqueTargets(recipients) {
+    const targets = new Map();
+    for (const recipient of recipients) {
+        for (const target of recipient.targets) {
+            if (!targets.has(target.symbol)) targets.set(target.symbol, target);
         }
-        const status = result.skipped ? "skipped" : "done";
-        await store.completeScheduledRun("daily-close", dateStr, status, result.reason || result.date);
-        return { action: status, reason: result.reason || "" };
+    }
+    return [...targets.values()];
+}
+
+function isBotBlocked(error) {
+    return error?.response?.status === 403;
+}
+
+async function runSchedulerTick(store, now = new Date(), services = {}) {
+    if (!isRunWindow(now)) return { action: "outside-window" };
+    const reportBuilder = services.buildReports || buildReports;
+    const deliver = services.deliverDailyClose || deliverDailyClose;
+    const notify = services.sendTelegramTo || sendTelegramTo;
+    const { dateStr } = getChinaClock(now);
+    const subscribers = await store.listActiveSubscribers();
+    const recipients = [];
+
+    for (const subscriber of subscribers) {
+        const targets = await store.list(subscriber.chat_id);
+        if (!targets.length) continue;
+        const attempt = await store.claimDeliveryRun(JOB_NAME, subscriber.chat_id, dateStr, MAX_ATTEMPTS);
+        if (attempt !== null) recipients.push({ subscriber, targets, attempt });
+    }
+    if (!recipients.length) return { action: "not-claimed" };
+
+    let result;
+    try {
+        result = await reportBuilder({
+            targets: uniqueTargets(recipients),
+            now,
+            dryRun: false,
+            allowPartial: true
+        });
     } catch (error) {
-        await store.failScheduledRun("daily-close", dateStr, error.message);
+        await Promise.all(recipients.map(recipient =>
+            store.failDeliveryRun(JOB_NAME, recipient.subscriber.chat_id, dateStr, error.message)
+        ));
         throw error;
     }
+
+    if (result.skipped) {
+        const retry = isTransientSkip(result.reason) && !isFinalWindow(now);
+        await Promise.all(recipients.map(recipient => retry
+            ? store.failDeliveryRun(JOB_NAME, recipient.subscriber.chat_id, dateStr, result.reason)
+            : store.completeDeliveryRun(JOB_NAME, recipient.subscriber.chat_id, dateStr, "skipped", result.reason)
+        ));
+        return { action: retry ? "retry" : "skipped", recipients: recipients.length, reason: result.reason };
+    }
+
+    const reportBySymbol = new Map(result.reports.map(report => [report.meta.symbol, report]));
+    const totals = { delivered: 0, retried: 0, skipped: 0, failed: 0, deactivated: 0 };
+    for (const recipient of recipients) {
+        const chatId = recipient.subscriber.chat_id;
+        const reports = recipient.targets.map(target => reportBySymbol.get(target.symbol)).filter(Boolean);
+        const missing = recipient.targets.filter(target => !reportBySymbol.has(target.symbol));
+        const finalAttempt = recipient.attempt >= MAX_ATTEMPTS || isFinalWindow(now);
+
+        if (missing.length && !finalAttempt) {
+            await store.failDeliveryRun(
+                JOB_NAME,
+                chatId,
+                dateStr,
+                `等待日K：${missing.map(target => target.symbol).join(",")}`
+            );
+            totals.retried++;
+            continue;
+        }
+        if (!reports.length) {
+            await store.completeDeliveryRun(
+                JOB_NAME,
+                chatId,
+                dateStr,
+                "skipped",
+                `无可用日K：${missing.map(target => target.symbol).join(",")}`
+            );
+            totals.skipped++;
+            continue;
+        }
+
+        try {
+            await deliver({ chatId, reports, date: result.date });
+            if (missing.length) {
+                const names = missing.map(target => `<code>${target.symbol}</code> ${escapeHtml(target.name)}`);
+                await notify(chatId, `⚠️ 以下股票今日没有完整日K，本次未包含：\n${names.join("\n")}`);
+            }
+            await store.completeDeliveryRun(
+                JOB_NAME,
+                chatId,
+                dateStr,
+                "done",
+                missing.length ? `部分发送，缺少：${missing.map(target => target.symbol).join(",")}` : result.date
+            );
+            totals.delivered++;
+        } catch (error) {
+            if (isBotBlocked(error)) {
+                await store.deactivateSubscriber(chatId);
+                await store.completeDeliveryRun(JOB_NAME, chatId, dateStr, "blocked", "用户已阻止机器人");
+                totals.deactivated++;
+            } else {
+                await store.failDeliveryRun(JOB_NAME, chatId, dateStr, error.message);
+                totals.failed++;
+            }
+        }
+    }
+    return { action: "processed", recipients: recipients.length, ...totals };
 }
 
 async function startScheduler() {
-    if (!process.env.DATABASE_URL) throw new Error("缺少DATABASE_URL");
+    const missing = ["DATABASE_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+        .filter(name => !process.env[name]);
+    if (missing.length) throw new Error(`缺少配置：${missing.join("、")}`);
     const store = createWatchlistStore();
     await store.initialize();
-    console.log("⏰ 每日收盘调度器已启动：工作日北京时间15:30-18:00自动补偿执行");
+    await store.registerSubscriber({ chatId: process.env.TELEGRAM_CHAT_ID });
+    await store.seed(process.env.TELEGRAM_CHAT_ID, DEFAULT_TARGETS);
+    await store.migrateLegacyScheduledRuns(process.env.TELEGRAM_CHAT_ID);
+    console.log("⏰ 多用户收盘调度器已启动：工作日北京时间15:30-18:00按用户独立投递");
 
     let stopped = false;
     const stop = () => { stopped = true; };
@@ -54,7 +160,7 @@ async function startScheduler() {
             try {
                 const outcome = await runSchedulerTick(store);
                 if (!["outside-window", "not-claimed"].includes(outcome.action)) {
-                    console.log(`📅 调度结果：${outcome.action}${outcome.reason ? `（${outcome.reason}）` : ""}`);
+                    console.log(`📅 调度结果：${JSON.stringify(outcome)}`);
                 }
             } catch (error) {
                 console.error(`❌ 每日收盘调度失败：${error.message}`);
@@ -74,4 +180,11 @@ if (require.main === module) {
     });
 }
 
-module.exports = { isRunWindow, isTransientSkip, runSchedulerTick, startScheduler };
+module.exports = {
+    isFinalWindow,
+    isRunWindow,
+    isTransientSkip,
+    runSchedulerTick,
+    startScheduler,
+    uniqueTargets
+};

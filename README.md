@@ -11,7 +11,7 @@ A-share stock scanner with multi-style rankings, Telegram notifications, and a m
 - MA/MACD/RSI/KDJ/Bollinger, volume-price, support/resistance, catalysts, and conditional trade plans
 - Telegram delivery includes a two-stock dashboard plus 30-day candlestick/volume charts with MA5/MA20, Bollinger bands, and support/resistance overlays
 - Final daily-bar validation so holidays and incomplete intraday quotes are not pushed as closes
-- Telegram menu for adding, removing, and listing up to 10 tracked stocks
+- Private multi-user Telegram subscriptions, each with an independent watchlist of up to 10 stocks
 
 ## Requirements
 - Node.js 18+
@@ -26,8 +26,9 @@ Create a `.env` file:
 ```
 FINNHUB_API_KEY=
 TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
-TELEGRAM_CHAT_ID=YOUR_CHAT_ID
-TELEGRAM_ALLOWED_USER_ID= # optional, recommended for group chats
+TELEGRAM_CHAT_ID=ADMIN_CHAT_ID
+BOT_INVITE_CODE= # optional; empty enables open registration
+MAX_SUBSCRIBERS=50
 TELEGRAM_WEBHOOK_SECRET=
 DATABASE_URL=
 PUBLIC_BASE_URL=https://your-service.example
@@ -66,6 +67,8 @@ docker compose run --rm bot npm run bot:menu
 ```
 
 Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The GitHub Actions workflow remains available for manual runs but no longer schedules duplicate reports.
+
+Each person starts a private subscription with `/start`, or `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist.
 
 ### Render deployment (optional)
 

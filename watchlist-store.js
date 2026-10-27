@@ -7,6 +7,18 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
 
     async function initialize() {
         await pool.query(`
+            CREATE TABLE IF NOT EXISTS telegram_subscribers (
+                chat_id TEXT PRIMARY KEY,
+                telegram_user_id TEXT,
+                username TEXT,
+                first_name TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS watchlist (
                 chat_id TEXT NOT NULL,
                 symbol VARCHAR(6) NOT NULL,
@@ -46,6 +58,76 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
                 PRIMARY KEY (job_name, run_date)
             )
         `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS daily_delivery_runs (
+                job_name TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                run_date DATE NOT NULL,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                message TEXT,
+                PRIMARY KEY (job_name, chat_id, run_date)
+            )
+        `);
+        await pool.query(`
+            INSERT INTO telegram_subscribers (chat_id, status)
+            SELECT DISTINCT chat_id, 'active' FROM watchlist
+            ON CONFLICT (chat_id) DO NOTHING
+        `);
+    }
+
+    async function registerSubscriber({ chatId, userId, username, firstName }) {
+        const result = await pool.query(
+            `INSERT INTO telegram_subscribers
+                (chat_id, telegram_user_id, username, first_name, status, updated_at)
+             VALUES ($1, $2, $3, $4, 'active', NOW())
+             ON CONFLICT (chat_id) DO UPDATE SET
+                telegram_user_id = COALESCE(EXCLUDED.telegram_user_id, telegram_subscribers.telegram_user_id),
+                username = COALESCE(EXCLUDED.username, telegram_subscribers.username),
+                first_name = COALESCE(EXCLUDED.first_name, telegram_subscribers.first_name),
+                status = 'active',
+                updated_at = NOW()
+             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone`,
+            [
+                String(chatId),
+                userId === undefined || userId === null ? null : String(userId),
+                username || null,
+                firstName || null
+            ]
+        );
+        return result.rows[0];
+    }
+
+    async function getSubscriber(chatId) {
+        const result = await pool.query(
+            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone
+             FROM telegram_subscribers WHERE chat_id = $1`,
+            [String(chatId)]
+        );
+        return result.rows[0] || null;
+    }
+
+    async function listActiveSubscribers() {
+        const result = await pool.query(
+            `SELECT chat_id, telegram_user_id, username, first_name, timezone
+             FROM telegram_subscribers
+             WHERE status = 'active'
+             ORDER BY created_at, chat_id`
+        );
+        return result.rows;
+    }
+
+    async function deactivateSubscriber(chatId) {
+        const result = await pool.query(
+            `UPDATE telegram_subscribers SET status = 'inactive', updated_at = NOW()
+             WHERE chat_id = $1`,
+            [String(chatId)]
+        );
+        await clearSession(chatId);
+        return result.rowCount > 0;
     }
 
     async function list(chatId) {
@@ -224,20 +306,79 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
         );
     }
 
+    async function migrateLegacyScheduledRuns(chatId) {
+        await pool.query(
+            `INSERT INTO daily_delivery_runs
+                (job_name, chat_id, run_date, status, attempts, next_attempt_at, started_at, finished_at, message)
+             SELECT job_name, $1, run_date, status, attempts, next_attempt_at, started_at, finished_at, message
+             FROM scheduled_runs
+             WHERE job_name = 'daily-close'
+             ON CONFLICT (job_name, chat_id, run_date) DO NOTHING`,
+            [String(chatId)]
+        );
+    }
+
+    async function claimDeliveryRun(jobName, chatId, runDate, maxAttempts = 12) {
+        const result = await pool.query(
+            `INSERT INTO daily_delivery_runs
+                (job_name, chat_id, run_date, status, attempts, next_attempt_at, started_at, message)
+             VALUES ($1, $2, $3, 'running', 1, NOW(), NOW(), NULL)
+             ON CONFLICT (job_name, chat_id, run_date) DO UPDATE SET
+                status = 'running',
+                attempts = daily_delivery_runs.attempts + 1,
+                started_at = NOW(),
+                message = NULL
+             WHERE daily_delivery_runs.attempts < $4
+               AND (
+                    (daily_delivery_runs.status = 'failed' AND daily_delivery_runs.next_attempt_at <= NOW())
+                    OR (daily_delivery_runs.status = 'running' AND daily_delivery_runs.started_at < NOW() - INTERVAL '45 minutes')
+               )
+             RETURNING attempts`,
+            [jobName, String(chatId), runDate, maxAttempts]
+        );
+        return result.rows[0] ? Number(result.rows[0].attempts) : null;
+    }
+
+    async function completeDeliveryRun(jobName, chatId, runDate, status, message = "") {
+        await pool.query(
+            `UPDATE daily_delivery_runs
+             SET status = $4, finished_at = NOW(), message = $5
+             WHERE job_name = $1 AND chat_id = $2 AND run_date = $3`,
+            [jobName, String(chatId), runDate, status, String(message || "").slice(0, 1000)]
+        );
+    }
+
+    async function failDeliveryRun(jobName, chatId, runDate, message = "") {
+        await pool.query(
+            `UPDATE daily_delivery_runs
+             SET status = 'failed', next_attempt_at = NOW() + INTERVAL '10 minutes', message = $4
+             WHERE job_name = $1 AND chat_id = $2 AND run_date = $3`,
+            [jobName, String(chatId), runDate, String(message || "").slice(0, 1000)]
+        );
+    }
+
     async function close() {
         await pool.end();
     }
 
     return {
+        claimDeliveryRun,
         claimScheduledRun,
         clearSession,
         close,
+        completeDeliveryRun,
         completeScheduledRun,
+        deactivateSubscriber,
+        failDeliveryRun,
         failScheduledRun,
         get,
+        getSubscriber,
         getSession,
         initialize,
         list,
+        listActiveSubscribers,
+        migrateLegacyScheduledRuns,
+        registerSubscriber,
         remove,
         seed,
         setSession,

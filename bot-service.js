@@ -29,13 +29,39 @@ function createBotController({
     marketService,
     sendMessage,
     answerCallback,
-    allowedChatId,
-    allowedUserId,
+    inviteCode = process.env.BOT_INVITE_CODE || "",
+    privateOnly = true,
+    maxSubscribers = Number(process.env.MAX_SUBSCRIBERS || 50),
     maxStocks = 10
 }) {
-    function authorized(chatId, userId) {
-        if (String(chatId) !== String(allowedChatId)) return false;
-        return !allowedUserId || String(userId) === String(allowedUserId);
+    function isPrivateChat(chat) {
+        return !privateOnly || !chat?.type || chat.type === "private";
+    }
+
+    async function isActiveSubscriber(chatId) {
+        const subscriber = await store.getSubscriber(chatId);
+        return Boolean(subscriber && subscriber.status === "active");
+    }
+
+    async function register(message, suppliedCode) {
+        const chatId = message.chat.id;
+        const existing = await store.getSubscriber(chatId);
+        if (inviteCode && !existing && suppliedCode !== inviteCode) {
+            return sendMessage(chatId, "需要有效邀请码才能启用每日股票追踪。\n请输入：<code>/start 邀请码</code>");
+        }
+        if (!existing && maxSubscribers > 0) {
+            const activeSubscribers = await store.listActiveSubscribers();
+            if (activeSubscribers.length >= maxSubscribers) {
+                return sendMessage(chatId, "当前订阅名额已满，请联系机器人管理员。");
+            }
+        }
+        await store.registerSubscriber({
+            chatId,
+            userId: message.from?.id,
+            username: message.from?.username,
+            firstName: message.from?.first_name
+        });
+        return sendMenu(chatId, "✅ 订阅已启用。你的自选股与其他用户完全独立。\n请先添加需要每日追踪的股票。");
     }
 
     async function sendMenu(chatId, text = "请选择要执行的操作：") {
@@ -103,11 +129,27 @@ function createBotController({
 
     async function handleMessage(message) {
         const chatId = message.chat && message.chat.id;
-        const userId = message.from && message.from.id;
-        if (!authorized(chatId, userId)) return;
+        if (!chatId) return;
         const text = String(message.text || "").trim();
+        if (!isPrivateChat(message.chat)) {
+            return sendMessage(chatId, "为保护每个人的自选股隐私，本机器人目前仅支持私聊使用。");
+        }
 
-        if (/^\/(?:start|menu)(?:@\w+)?$/i.test(text)) return sendMenu(chatId, "每日股票追踪机器人已就绪。");
+        const startArgument = commandArgument(text, "start");
+        if (startArgument !== null) return register(message, startArgument.trim());
+        if (!await isActiveSubscriber(chatId)) {
+            return sendMessage(chatId, inviteCode
+                ? "请使用 <code>/start 邀请码</code> 完成注册。"
+                : "请先发送 /start 启用每日股票追踪。");
+        }
+
+        if (/^\/menu(?:@\w+)?$/i.test(text)) return sendMenu(chatId, "每日股票追踪机器人已就绪。");
+        if (/^\/stop(?:@\w+)?$/i.test(text)) {
+            await store.deactivateSubscriber(chatId);
+            return sendMessage(chatId, "已暂停每日推送。你的自选股仍会保留，发送 /start 可随时恢复。", {
+                replyMarkup: { remove_keyboard: true }
+            });
+        }
         if (/^\/cancel(?:@\w+)?$/i.test(text)) {
             await store.clearSession(chatId);
             return sendMenu(chatId, "已取消当前操作。");
@@ -127,8 +169,7 @@ function createBotController({
 
     async function handleCallback(query) {
         const chatId = query.message && query.message.chat && query.message.chat.id;
-        const userId = query.from && query.from.id;
-        if (!authorized(chatId, userId)) {
+        if (!chatId || !isPrivateChat(query.message?.chat) || !await isActiveSubscriber(chatId)) {
             return answerCallback(query.id, { text: "无权操作此机器人", showAlert: true });
         }
         await answerCallback(query.id);

@@ -6,6 +6,7 @@ const COMMANDS = [
     { command: "add", description: "添加每日追踪股票" },
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
+    { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
 ];
 

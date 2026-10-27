@@ -8,7 +8,7 @@ const { formatDailyCloseDelivery } = require("./daily-format");
 const { createMarketService } = require("./market");
 const { createNewsService } = require("./news");
 const { DEFAULT_TARGETS } = require("./stocks");
-const { sendTelegramPhoto } = require("./telegram");
+const { sendTelegramPhotoTo } = require("./telegram");
 const { analyzeKlines, buildTradePlan } = require("./technical");
 const { createWatchlistStore } = require("./watchlist-store");
 
@@ -166,7 +166,7 @@ async function loadTargets() {
     }
 }
 
-async function buildReports({ dryRun = false, now = new Date(), targets } = {}) {
+async function buildReports({ dryRun = false, now = new Date(), targets, allowPartial = false } = {}) {
     const httpClient = createHttpClient();
     const marketService = createMarketService({ httpClient, requestWithRetry });
     const newsService = createNewsService({
@@ -182,12 +182,55 @@ async function buildReports({ dryRun = false, now = new Date(), targets } = {}) 
     if (!activeTargets.length) {
         return { skipped: true, reason: "自选股列表为空", date: null, reports: [] };
     }
-    const klineSets = await Promise.all(activeTargets.map(target => marketService.getDailyKline(target.symbol, 140)));
-    const selection = selectReportDate(klineSets, { dryRun, now });
+    let reportTargets = activeTargets;
+    let unavailable = [];
+    let klineSets;
+    let selection;
+
+    if (allowPartial && !dryRun) {
+        const { dateStr, weekday } = getChinaClock(now);
+        if (weekday === "Sat" || weekday === "Sun") {
+            return { skipped: true, reason: "周末不发送", date: null, reports: [], unavailable: [] };
+        }
+        if (!isAfterChinaClose(now)) {
+            return { skipped: true, reason: "北京时间15:15前不使用可能尚未收定的日K", date: null, reports: [], unavailable: [] };
+        }
+        const settled = await Promise.allSettled(
+            activeTargets.map(target => marketService.getDailyKline(target.symbol, 140))
+        );
+        const ready = [];
+        settled.forEach((result, index) => {
+            const target = activeTargets[index];
+            if (result.status === "rejected") {
+                unavailable.push({ target, reason: formatError(result.reason) });
+                return;
+            }
+            if (!result.value.at(-1) || result.value.at(-1).date !== dateStr) {
+                unavailable.push({ target, reason: `${dateStr}没有完整日K` });
+                return;
+            }
+            ready.push({ target, rows: result.value });
+        });
+        if (!ready.length) {
+            return {
+                skipped: true,
+                reason: `${dateStr}没有完整日K，按非交易日或数据未就绪处理`,
+                date: null,
+                reports: [],
+                unavailable
+            };
+        }
+        reportTargets = ready.map(item => item.target);
+        klineSets = ready.map(item => item.rows);
+        selection = { date: dateStr, reason: "" };
+    } else {
+        klineSets = await Promise.all(activeTargets.map(target => marketService.getDailyKline(target.symbol, 140)));
+        selection = selectReportDate(klineSets, { dryRun, now });
+    }
     if (!selection.date) return { skipped: true, reason: selection.reason, date: null, reports: [] };
 
-    const contextItems = await getContextItems(newsService, activeTargets);
-    const reports = activeTargets.map((meta, index) => {
+    const contextItems = await getContextItems(newsService, reportTargets);
+    const reports = reportTargets.map((meta, index) => {
         const rows = klineSets[index].filter(item => item.date <= selection.date);
         const analysis = analyzeKlines(rows);
         if (analysis.latest.date !== selection.date) {
@@ -202,7 +245,34 @@ async function buildReports({ dryRun = false, now = new Date(), targets } = {}) 
             announcements: contextItems[index].announcements
         };
     });
-    return { skipped: false, reason: "", date: selection.date, reports };
+    return { skipped: false, reason: "", date: selection.date, reports, unavailable };
+}
+
+async function deliverDailyClose({ chatId, reports, date, dryRun = false }) {
+    const delivery = formatDailyCloseDelivery({ reports, date });
+    if (dryRun) {
+        delivery.overviews.forEach((item, index) => {
+            const overviewChart = generateOverviewChart(item.reports, date);
+            console.log(`\n===== Telegram 总览图 ${index + 1}/${delivery.overviews.length}（${overviewChart.length} bytes）=====\n${item.caption}`);
+        });
+        delivery.stocks.forEach((item, index) => {
+            const chart = generateStockChart(item.report);
+            console.log(`\n===== Telegram 图表 ${index + 1}/${delivery.stocks.length}（${chart.length} bytes）=====\n${item.caption}`);
+        });
+        return delivery;
+    }
+    if (!process.env.TELEGRAM_BOT_TOKEN || !chatId) {
+        throw new Error("缺少TELEGRAM_BOT_TOKEN或目标chat_id，未发送任何消息");
+    }
+    for (const item of delivery.overviews) {
+        await sendTelegramPhotoTo(chatId, generateOverviewChart(item.reports, date), item.caption, item.filename);
+        await delay(350);
+    }
+    for (const item of delivery.stocks) {
+        await delay(350);
+        await sendTelegramPhotoTo(chatId, generateStockChart(item.report), item.caption, item.filename);
+    }
+    return delivery;
 }
 
 async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {}) {
@@ -213,15 +283,12 @@ async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {
         return result;
     }
 
-    const delivery = formatDailyCloseDelivery(result);
     if (dryRun) {
-        delivery.overviews.forEach((item, index) => {
-            const overviewChart = generateOverviewChart(item.reports, result.date);
-            console.log(`\n===== Telegram 总览图 ${index + 1}/${delivery.overviews.length}（${overviewChart.length} bytes）=====\n${item.caption}`);
-        });
-        delivery.stocks.forEach((item, index) => {
-            const chart = generateStockChart(item.report);
-            console.log(`\n===== Telegram 图表 ${index + 1}/${delivery.stocks.length}（${chart.length} bytes）=====\n${item.caption}`);
+        const delivery = await deliverDailyClose({
+            chatId: process.env.TELEGRAM_CHAT_ID,
+            reports: result.reports,
+            date: result.date,
+            dryRun: true
         });
         return { ...result, delivery };
     }
@@ -229,14 +296,11 @@ async function runDailyClose({ dryRun = process.argv.includes("--dry-run") } = {
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
         throw new Error("缺少TELEGRAM_BOT_TOKEN或TELEGRAM_CHAT_ID，未发送任何消息");
     }
-    for (const item of delivery.overviews) {
-        await sendTelegramPhoto(generateOverviewChart(item.reports, result.date), item.caption, item.filename);
-        await delay(350);
-    }
-    for (const item of delivery.stocks) {
-        await delay(350);
-        await sendTelegramPhoto(generateStockChart(item.report), item.caption, item.filename);
-    }
+    const delivery = await deliverDailyClose({
+        chatId: process.env.TELEGRAM_CHAT_ID,
+        reports: result.reports,
+        date: result.date
+    });
     console.log(`✅ 已向Telegram发送${delivery.overviews.length}张总览图和${delivery.stocks.length}张${result.date}个股图表`);
     return { ...result, delivery };
 }
@@ -252,6 +316,7 @@ module.exports = {
     DEFAULT_TARGETS,
     buildReports,
     commonLatestDate,
+    deliverDailyClose,
     loadTargets,
     prioritize,
     runDailyClose,

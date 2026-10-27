@@ -14,8 +14,7 @@ const { createWatchlistStore } = require("./watchlist-store");
 const PORT = Number(process.env.PORT || 10000);
 const HOST = "0.0.0.0";
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
-const ALLOWED_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const ALLOWED_USER_ID = process.env.TELEGRAM_ALLOWED_USER_ID || "";
+const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy;
 
 function requireConfiguration() {
@@ -23,7 +22,7 @@ function requireConfiguration() {
         ["TELEGRAM_BOT_TOKEN", process.env.TELEGRAM_BOT_TOKEN],
         ["DATABASE_URL", process.env.DATABASE_URL],
         ["TELEGRAM_WEBHOOK_SECRET", WEBHOOK_SECRET],
-        ["TELEGRAM_CHAT_ID", ALLOWED_CHAT_ID]
+        ["TELEGRAM_CHAT_ID", ADMIN_CHAT_ID]
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missing.length) throw new Error(`缺少配置：${missing.join("、")}`);
     if (!/^[A-Za-z0-9_-]{16,256}$/.test(WEBHOOK_SECRET)) {
@@ -88,15 +87,16 @@ async function startServer() {
     requireConfiguration();
     const store = createWatchlistStore();
     await store.initialize();
-    await store.seed(ALLOWED_CHAT_ID, DEFAULT_TARGETS);
+    await store.registerSubscriber({ chatId: ADMIN_CHAT_ID });
+    await store.seed(ADMIN_CHAT_ID, DEFAULT_TARGETS);
+    await store.migrateLegacyScheduledRuns(ADMIN_CHAT_ID);
     const marketService = createMarketService({ httpClient: createHttpClient(), requestWithRetry });
     const controller = createBotController({
         store,
         marketService,
         sendMessage: sendTelegramTo,
         answerCallback: answerCallbackQuery,
-        allowedChatId: ALLOWED_CHAT_ID,
-        allowedUserId: ALLOWED_USER_ID
+        inviteCode: process.env.BOT_INVITE_CODE || ""
     });
 
     const server = http.createServer(async (req, res) => {
@@ -119,10 +119,11 @@ async function startServer() {
             const update = await readJsonBody(req);
             res.writeHead(200);
             res.end("ok");
-            setImmediate(() => controller.handleUpdate(update).catch(error => {
+            setImmediate(() => controller.handleUpdate(update).catch(async error => {
                 console.error(`❌ Telegram更新处理失败：${error.message}`);
                 const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-                if (chatId && String(chatId) === String(ALLOWED_CHAT_ID)) {
+                const subscriber = chatId ? await store.getSubscriber(chatId).catch(() => null) : null;
+                if (subscriber?.status === "active") {
                     sendTelegramTo(chatId, "❌ 操作失败，请稍后重试。").catch(() => {});
                 }
             }));

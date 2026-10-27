@@ -17,8 +17,10 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-      - key: TELEGRAM_ALLOWED_USER_ID
+      - key: BOT_INVITE_CODE
         sync: false
+      - key: MAX_SUBSCRIBERS
+        value: "50"
       - key: TELEGRAM_WEBHOOK_SECRET
         generateValue: true
 

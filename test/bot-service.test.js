@@ -2,36 +2,67 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { BUTTONS, createBotController, menuReplyMarkup } = require("../bot-service");
 
-function createMemoryStore(initial = []) {
-    const items = new Map(initial.map(item => [item.symbol, item]));
+function createMemoryStore(initial = [], registered = true) {
+    const items = new Map([["100", new Map(initial.map(item => [item.symbol, item]))]]);
     const sessions = new Map();
+    const subscribers = new Map(registered ? [["100", { chat_id: "100", status: "active" }]] : []);
+    const bucket = chatId => {
+        const key = String(chatId);
+        if (!items.has(key)) items.set(key, new Map());
+        return items.get(key);
+    };
     return {
-        async list() { return [...items.values()]; },
-        async get(_chatId, symbol) { return items.get(symbol) || null; },
-        async upsert(_chatId, target) { items.set(target.symbol, target); return target; },
-        async remove(_chatId, symbol) { return items.delete(symbol); },
+        async list(chatId) { return [...bucket(chatId).values()]; },
+        async get(chatId, symbol) { return bucket(chatId).get(symbol) || null; },
+        async upsert(chatId, target) { bucket(chatId).set(target.symbol, target); return target; },
+        async remove(chatId, symbol) { return bucket(chatId).delete(symbol); },
         async setSession(chatId, action) { sessions.set(String(chatId), action); },
         async getSession(chatId) { return sessions.get(String(chatId)) || null; },
-        async clearSession(chatId) { sessions.delete(String(chatId)); }
+        async clearSession(chatId) { sessions.delete(String(chatId)); },
+        async getSubscriber(chatId) { return subscribers.get(String(chatId)) || null; },
+        async listActiveSubscribers() {
+            return [...subscribers.values()].filter(item => item.status === "active");
+        },
+        async registerSubscriber({ chatId, userId, username, firstName }) {
+            const value = {
+                chat_id: String(chatId),
+                telegram_user_id: userId ? String(userId) : null,
+                username,
+                first_name: firstName,
+                status: "active"
+            };
+            subscribers.set(String(chatId), value);
+            return value;
+        },
+        async deactivateSubscriber(chatId) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.status = "inactive";
+            sessions.delete(String(chatId));
+            return true;
+        }
     };
 }
 
-function setup(initial = []) {
+function setup(initial = [], options = {}) {
     const sent = [];
     const answered = [];
-    const store = createMemoryStore(initial);
+    const store = createMemoryStore(initial, options.registered !== false);
     const controller = createBotController({
         store,
         marketService: {
             async getStockProfile(symbol) { return { symbol, name: symbol === "600519" ? "贵州茅台" : "测试股票" }; }
         },
-        async sendMessage(chatId, text, options) { sent.push({ chatId, text, options }); },
-        async answerCallback(id, options) { answered.push({ id, options }); },
-        allowedChatId: "100",
-        allowedUserId: "200",
+        async sendMessage(chatId, text, sendOptions) { sent.push({ chatId, text, options: sendOptions }); },
+        async answerCallback(id, answerOptions) { answered.push({ id, options: answerOptions }); },
+        inviteCode: options.inviteCode || "",
         maxStocks: 10
     });
     return { answered, controller, sent, store };
+}
+
+function privateMessage(text, chatId = 100, userId = 200) {
+    return { message: { chat: { id: chatId, type: "private" }, from: { id: userId, first_name: "测试" }, text } };
 }
 
 test("菜单提供添加、删除和追踪列表按钮", () => {
@@ -40,12 +71,29 @@ test("菜单提供添加、删除和追踪列表按钮", () => {
     assert.deepEqual(labels, [BUTTONS.ADD, BUTTONS.REMOVE, BUTTONS.LIST]);
 });
 
-test("/add会校验行情并写入自选股", async () => {
+test("新用户通过/start建立独立订阅", async () => {
+    const { controller, sent, store } = setup([], { registered: false });
+    await controller.handleUpdate(privateMessage("/start"));
+    assert.equal((await store.getSubscriber(100)).status, "active");
+    assert.match(sent.at(-1).text, /订阅已启用/);
+});
+
+test("配置邀请码后拒绝无效邀请码", async () => {
+    const { controller, sent, store } = setup([], { registered: false, inviteCode: "friends" });
+    await controller.handleUpdate(privateMessage("/start wrong"));
+    assert.equal(await store.getSubscriber(100), null);
+    assert.match(sent.at(-1).text, /有效邀请码/);
+    await controller.handleUpdate(privateMessage("/start friends"));
+    assert.equal((await store.getSubscriber(100)).status, "active");
+});
+
+test("/add会校验行情并写入当前用户自选股", async () => {
     const { controller, sent, store } = setup();
-    await controller.handleUpdate({ message: { chat: { id: 100 }, from: { id: 200 }, text: "/add 600519" } });
-    const targets = await store.list();
+    await controller.handleUpdate(privateMessage("/add 600519"));
+    const targets = await store.list(100);
     assert.equal(targets.length, 1);
     assert.equal(targets[0].symbol, "600519");
+    assert.equal((await store.list(999)).length, 0);
     assert.match(sent.at(-1).text, /贵州茅台/);
 });
 
@@ -56,27 +104,35 @@ test("删除按钮需要二次确认后才删除", async () => {
         callback_query: {
             id: "cb1",
             from: { id: 200 },
-            message: { chat: { id: 100 } },
+            message: { chat: { id: 100, type: "private" } },
             data: "delete:600887"
         }
     });
-    assert.equal((await store.list()).length, 1);
+    assert.equal((await store.list(100)).length, 1);
     assert.match(sent.at(-1).text, /确认删除/);
     await controller.handleUpdate({
         callback_query: {
             id: "cb2",
             from: { id: 200 },
-            message: { chat: { id: 100 } },
+            message: { chat: { id: 100, type: "private" } },
             data: "delete_confirm:600887"
         }
     });
-    assert.equal((await store.list()).length, 0);
+    assert.equal((await store.list(100)).length, 0);
     assert.equal(answered.length, 2);
 });
 
-test("非授权用户不能修改列表", async () => {
+test("/stop暂停订阅但保留自选股", async () => {
+    const initial = [{ symbol: "600887", name: "伊利股份" }];
+    const { controller, store } = setup(initial);
+    await controller.handleUpdate(privateMessage("/stop"));
+    assert.equal((await store.getSubscriber(100)).status, "inactive");
+    assert.equal((await store.list(100)).length, 1);
+});
+
+test("群聊不开放个人自选股操作", async () => {
     const { controller, sent, store } = setup();
-    await controller.handleUpdate({ message: { chat: { id: 100 }, from: { id: 999 }, text: "/add 600519" } });
-    assert.equal((await store.list()).length, 0);
-    assert.equal(sent.length, 0);
+    await controller.handleUpdate({ message: { chat: { id: -100, type: "group" }, from: { id: 200 }, text: "/start" } });
+    assert.equal(await store.getSubscriber(-100), null);
+    assert.match(sent.at(-1).text, /仅支持私聊/);
 });

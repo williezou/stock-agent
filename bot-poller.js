@@ -9,14 +9,13 @@ const { answerCallbackQuery, sendTelegramTo, telegramRequest } = require("./tele
 const { COMMANDS } = require("./telegram-setup");
 const { createWatchlistStore } = require("./watchlist-store");
 
-const ALLOWED_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const ALLOWED_USER_ID = process.env.TELEGRAM_ALLOWED_USER_ID || "";
+const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy;
 
 function requireConfiguration() {
     const missing = [
         ["TELEGRAM_BOT_TOKEN", process.env.TELEGRAM_BOT_TOKEN],
-        ["TELEGRAM_CHAT_ID", ALLOWED_CHAT_ID],
+        ["TELEGRAM_CHAT_ID", ADMIN_CHAT_ID],
         ["DATABASE_URL", process.env.DATABASE_URL]
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missing.length) throw new Error(`缺少配置：${missing.join("、")}`);
@@ -49,15 +48,16 @@ async function startPolling() {
     requireConfiguration();
     const store = createWatchlistStore();
     await store.initialize();
-    await store.seed(ALLOWED_CHAT_ID, DEFAULT_TARGETS);
+    await store.registerSubscriber({ chatId: ADMIN_CHAT_ID });
+    await store.seed(ADMIN_CHAT_ID, DEFAULT_TARGETS);
+    await store.migrateLegacyScheduledRuns(ADMIN_CHAT_ID);
     const marketService = createMarketService({ httpClient: createHttpClient(), requestWithRetry });
     const controller = createBotController({
         store,
         marketService,
         sendMessage: sendTelegramTo,
         answerCallback: answerCallbackQuery,
-        allowedChatId: ALLOWED_CHAT_ID,
-        allowedUserId: ALLOWED_USER_ID
+        inviteCode: process.env.BOT_INVITE_CODE || ""
     });
 
     await telegramRequest("deleteWebhook", { drop_pending_updates: false });
@@ -85,7 +85,8 @@ async function startPolling() {
                     } catch (error) {
                         console.error(`❌ Telegram更新处理失败：${error.message}`);
                         const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-                        if (chatId && String(chatId) === String(ALLOWED_CHAT_ID)) {
+                        const subscriber = chatId ? await store.getSubscriber(chatId).catch(() => null) : null;
+                        if (subscriber?.status === "active") {
                             await sendTelegramTo(chatId, "❌ 操作失败，请稍后重试。").catch(() => {});
                         }
                     }
