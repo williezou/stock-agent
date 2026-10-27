@@ -60,9 +60,9 @@ async function sendTelegramTo(chatId, text, options = {}) {
     });
 }
 
-async function sendTelegram(text) {
+async function sendTelegram(text, options = {}) {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
-    return sendTelegramTo(TELEGRAM_CHAT_ID, text);
+    return sendTelegramTo(TELEGRAM_CHAT_ID, text, options);
 }
 
 function multipartField(boundary, name, value) {

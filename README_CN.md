@@ -54,6 +54,35 @@ GitHub Actions 工作流 `.github/workflows/daily-close.yml` 会在工作日北�
 
 ## Telegram 菜单与 Render 部署
 
+### 本机 Docker 部署（推荐）
+
+本机部署使用 Telegram 长轮询，不需要公网 IP、域名或 HTTPS。Docker Compose 会启动：
+
+- `bot`：处理添加、删除和查看追踪股票
+- `scheduler`：工作日北京时间 15:30 后生成每日收盘报告；行情未就绪时每 10 分钟重试
+- `postgres`：持久化自选股与任务执行状态，数据库端口不会暴露到宿主机
+
+确保 `.env` 中已有 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_CHAT_ID`，然后执行：
+
+```bash
+docker compose up -d --build
+docker compose run --rm bot npm run bot:menu
+```
+
+常用运维命令：
+
+```bash
+docker compose ps
+docker compose logs -f bot scheduler
+docker compose restart bot scheduler
+docker compose down             # 保留数据库卷
+docker compose down --volumes   # 同时删除本地数据库数据
+```
+
+如果宿主机通过代理访问 Telegram，默认会使用 `http://host.docker.internal:6152`；可通过 `.env` 中的 `DOCKER_PROXY_URL` 修改。定时任务由本机容器负责，GitHub Actions 工作流仅保留手动触发，避免重复推送。
+
+### Render 部署（可选）
+
 项目根目录的 `render.yaml` 可创建 Node webhook Web Service 和 PostgreSQL。部署后设置以下 Render 环境变量：
 
 ```

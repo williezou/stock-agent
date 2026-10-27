@@ -56,6 +56,19 @@ The GitHub Actions workflow in `.github/workflows/daily-close.yml` runs at 15:30
 
 ## Telegram menu deployment
 
+### Local Docker deployment (recommended)
+
+Local deployment uses Telegram long polling, so no public IP, domain, or HTTPS endpoint is required. Docker Compose runs a polling bot, a weekday 15:30 Asia/Shanghai scheduler with delayed retries, and a private PostgreSQL database:
+
+```bash
+docker compose up -d --build
+docker compose run --rm bot npm run bot:menu
+```
+
+Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The GitHub Actions workflow remains available for manual runs but no longer schedules duplicate reports.
+
+### Render deployment (optional)
+
 `render.yaml` provisions a Node webhook service and PostgreSQL for testing. After deployment, configure the Telegram credentials and webhook secret in Render. Render supplies `RENDER_EXTERNAL_URL`, so the service registers its Telegram webhook and commands automatically.
 
 Outside Render, set the public service URL locally and run:

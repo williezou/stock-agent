@@ -33,6 +33,19 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
                 initialized_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS scheduled_runs (
+                job_name TEXT NOT NULL,
+                run_date DATE NOT NULL,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                message TEXT,
+                PRIMARY KEY (job_name, run_date)
+            )
+        `);
     }
 
     async function list(chatId) {
@@ -172,11 +185,64 @@ function createWatchlistStore({ connectionString = process.env.DATABASE_URL } = 
         await pool.query("DELETE FROM bot_sessions WHERE chat_id = $1", [String(chatId)]);
     }
 
+    async function claimScheduledRun(jobName, runDate, maxAttempts = 12) {
+        const result = await pool.query(
+            `INSERT INTO scheduled_runs
+                (job_name, run_date, status, attempts, next_attempt_at, started_at, message)
+             VALUES ($1, $2, 'running', 1, NOW(), NOW(), NULL)
+             ON CONFLICT (job_name, run_date) DO UPDATE SET
+                status = 'running',
+                attempts = scheduled_runs.attempts + 1,
+                started_at = NOW(),
+                message = NULL
+             WHERE scheduled_runs.attempts < $3
+               AND (
+                    (scheduled_runs.status = 'failed' AND scheduled_runs.next_attempt_at <= NOW())
+                    OR (scheduled_runs.status = 'running' AND scheduled_runs.started_at < NOW() - INTERVAL '45 minutes')
+               )
+             RETURNING attempts`,
+            [jobName, runDate, maxAttempts]
+        );
+        return result.rowCount > 0;
+    }
+
+    async function completeScheduledRun(jobName, runDate, status, message = "") {
+        await pool.query(
+            `UPDATE scheduled_runs
+             SET status = $3, finished_at = NOW(), message = $4
+             WHERE job_name = $1 AND run_date = $2`,
+            [jobName, runDate, status, String(message || "").slice(0, 1000)]
+        );
+    }
+
+    async function failScheduledRun(jobName, runDate, message = "") {
+        await pool.query(
+            `UPDATE scheduled_runs
+             SET status = 'failed', next_attempt_at = NOW() + INTERVAL '10 minutes', message = $3
+             WHERE job_name = $1 AND run_date = $2`,
+            [jobName, runDate, String(message || "").slice(0, 1000)]
+        );
+    }
+
     async function close() {
         await pool.end();
     }
 
-    return { clearSession, close, get, getSession, initialize, list, remove, seed, setSession, upsert };
+    return {
+        claimScheduledRun,
+        clearSession,
+        close,
+        completeScheduledRun,
+        failScheduledRun,
+        get,
+        getSession,
+        initialize,
+        list,
+        remove,
+        seed,
+        setSession,
+        upsert
+    };
 }
 
 module.exports = { createWatchlistStore };

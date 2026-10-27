@@ -5,8 +5,11 @@
   "scripts": {
     "scan": "node scanner.js",
     "bot": "node bot-server.js",
+    "bot:poll": "node bot-poller.js",
+    "bot:menu": "node scripts/send-menu.js",
     "daily-close": "node daily-close.js",
     "daily-close:dry-run": "node daily-close.js --dry-run",
+    "daily:scheduler": "node daily-scheduler.js",
     "telegram:configure": "node scripts/configure-telegram.js",
     "test": "node --test test/*.test.js"
   },

@@ -1,0 +1,46 @@
+name: stock-agent
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  init: true
+  env_file:
+    - .env
+  environment:
+    DATABASE_URL: postgresql://stock_agent:${POSTGRES_PASSWORD:-stock_agent_local}@postgres:5432/stock_agent
+    HTTP_PROXY: ${DOCKER_PROXY_URL:-http://host.docker.internal:6152}
+    HTTPS_PROXY: ${DOCKER_PROXY_URL:-http://host.docker.internal:6152}
+    NO_PROXY: postgres,localhost,127.0.0.1
+    TZ: Asia/Shanghai
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stock_agent
+      POSTGRES_USER: stock_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stock_agent_local}
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stock_agent -d stock_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  bot:
+    <<: *app
+    command: npm run bot:poll
+
+  scheduler:
+    <<: *app
+    command: npm run daily:scheduler
+
+volumes:
+  postgres_data:
