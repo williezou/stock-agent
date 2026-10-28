@@ -41,19 +41,36 @@ test("同花顺日K合并当日K线，成交量换算为手并带成交额换手
     assert.equal(parseJsonp(thsHistory).name, "贵州茅台");
 });
 
+// 财联社前复权日K（成交量单位为股，涨跌幅/振幅/换手率为小数）
+const clsPayload = {
+    code: 200,
+    data: [
+        { date: 20261027, open_px: 1340, high_px: 1360, low_px: 1335, close_px: 1350, preclose_px: 1338, change: 0.008969, amp: 0.018685, business_amount: 3000000, business_balance: 4050000000, tr: 0.0024 },
+        { date: 20261028, open_px: 1351, high_px: 1362, low_px: 1349, close_px: 1355.9, preclose_px: 1350, change: 0.00437, amp: 0.00963, business_amount: 2500000, business_balance: 3389750000, tr: 0.002 }
+    ]
+};
+
+function sourceName(url) {
+    if (url.includes("eastmoney")) return "em";
+    if (url.includes("10jqka")) return "ths";
+    if (url.includes("cls.cn")) return "cls";
+    return "tx";
+}
+
 function sourceClient(failing, calls) {
     return {
         async get(url) {
-            const source = url.includes("eastmoney") ? "em" : url.includes("10jqka") ? "ths" : "tx";
+            const source = sourceName(url);
             if (!url.includes("today.js")) calls.push(source);
             if (failing.includes(source)) throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
             if (source === "ths") return { data: url.includes("today.js") ? thsToday : thsHistory };
+            if (source === "cls") return { data: url.includes("/basic") ? { code: 200, data: { secu_name: "贵州茅台", secu_code: "sh600519" } } : clsPayload };
             return { data: tencentPayload };
         }
     };
 }
 
-test("东方财富失败时依次切换同花顺、腾讯，连续失败的源进入冷却", async () => {
+test("东方财富失败时依次切换同花顺、财联社、腾讯，连续失败的源进入冷却", async () => {
     const calls = [];
     const service = createMarketService({ httpClient: sourceClient(["em"], calls), requestWithRetry: fn => fn() });
     for (let i = 0; i < 3; i++) {
@@ -67,12 +84,18 @@ test("东方财富失败时依次切换同花顺、腾讯，连续失败的源�
     assert.deepEqual(health.sources, { "同花顺": 3 });
     assert.deepEqual(await service.getStockProfile("600519"), { symbol: "600519", name: "贵州茅台" });
 
-    const txCalls = [];
-    const tencentOnly = createMarketService({ httpClient: sourceClient(["em", "ths"], txCalls), requestWithRetry: fn => fn() });
-    assert.equal((await tencentOnly.getDailyKline("600519", 2)).at(-1).close, 1355.9);
-    assert.deepEqual(txCalls, ["em", "ths", "tx"]);
+    const clsCalls = [];
+    const clsFallback = createMarketService({ httpClient: sourceClient(["em", "ths"], clsCalls), requestWithRetry: fn => fn() });
+    const clsRows = await clsFallback.getDailyKline("600519", 2);
+    assert.deepEqual(clsCalls, ["em", "ths", "cls"], "同花顺之后先用财联社");
+    assert.ok(clsRows.every(row => Number.isFinite(row.amount) && Number.isFinite(row.turnover)), "财联社日K含成交额与换手率");
 
-    const allDown = createMarketService({ httpClient: sourceClient(["em", "ths", "tx"], []), requestWithRetry: fn => fn() });
+    const txCalls = [];
+    const tencentOnly = createMarketService({ httpClient: sourceClient(["em", "ths", "cls"], txCalls), requestWithRetry: fn => fn() });
+    assert.equal((await tencentOnly.getDailyKline("600519", 2)).at(-1).close, 1355.9);
+    assert.deepEqual(txCalls, ["em", "ths", "cls", "tx"]);
+
+    const allDown = createMarketService({ httpClient: sourceClient(["em", "ths", "cls", "tx"], []), requestWithRetry: fn => fn() });
     await assert.rejects(allDown.getDailyKline("600519", 2));
     assert.equal(allDown.health().fallbackFailures, 1);
 });
@@ -127,7 +150,7 @@ test("查无此股不计入熔断，冷却结束后重新计数", async () => {
     const calls = [];
     const httpClient = {
         async get(url, options = {}) {
-            const source = url.includes("eastmoney") ? "em" : url.includes("10jqka") ? "ths" : "tx";
+            const source = sourceName(url);
             if (!url.includes("today.js")) calls.push(source);
             if (source === "em" && emDown) throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
             if (source === "em") return { data: { data: null } };
@@ -139,7 +162,7 @@ test("查无此股不计入熔断，冷却结束后重新计数", async () => {
     for (let i = 0; i < 3; i++) await assert.rejects(service.getStockProfile("999999"), /无法识别股票代码/);
     assert.equal(service.health().primaryFailures, 0);
     assert.equal(service.health().fallbackFailures, 0);
-    assert.deepEqual(calls.slice(-3), ["em", "ths", "tx"], "无效代码不会让数据源进入冷却");
+    assert.deepEqual(calls.slice(-4), ["em", "ths", "cls", "tx"], "无效代码不会让数据源进入冷却");
 
     emDown = true;
     await assert.rejects(service.getDailyKline("600519", 2));
@@ -179,6 +202,29 @@ test("东方财富push2：默认用主域名，纯IPv6时改用带IPv6的编号�
 test("东方财富编号节点：不受IPV6_ONLY影响，始终随机选1~100", () => {
     const { push2NodeUrl } = require("../../src/models/market/sources/eastmoney");
     assert.equal(push2NodeUrl("/api/qt/clist/get", () => 0.5), "https://51.push2.eastmoney.com/api/qt/clist/get");
+});
+
+test("解析财联社日K：日期格式化，成交量换算为手，涨跌幅/振幅/换手率换算为%", () => {
+    const { parseClsKlines } = require("../../src/models/market/sources/cls");
+    const [first, second] = parseClsKlines(clsPayload);
+    assert.equal(first.date, "2026-10-27");
+    assert.equal(first.volume, 30000);
+    assert.equal(first.amount, 4050000000);
+    assert.ok(Math.abs(first.changePct - 0.8969) < 1e-9);
+    assert.ok(Math.abs(first.turnover - 0.24) < 1e-9);
+    assert.ok(Math.abs(second.change - 5.9) < 1e-9);
+    assert.deepEqual(parseClsKlines({ code: 200, data: [] }), []);
+});
+
+test("纯IPv6：东方财富失败时先用财联社（字段完整），不请求同花顺", async () => {
+    await withIpv6Only(async () => {
+        const calls = [];
+        const service = createMarketService({ httpClient: sourceClient(["em"], calls), requestWithRetry: fn => fn() });
+        const rows = await service.getDailyKline("600519", 2);
+        assert.equal(rows.at(-1).close, 1355.9);
+        assert.deepEqual(calls, ["em", "cls"]);
+        assert.deepEqual(await service.getStockProfile("600519"), { symbol: "600519", name: "贵州茅台" });
+    });
 });
 
 test("纯IPv6：行情跳过同花顺，东方财富失败直接切换腾讯IPv6入口", async () => {

@@ -39,7 +39,7 @@ DATABASE_URL=
 PUBLIC_BASE_URL=https://your-service.example
 HTTP_PROXY=   # optional
 HTTPS_PROXY=  # optional
-IPV6_ONLY=false # optional; true on IPv6-only hosts: Eastmoney quotes use IPv6-capable numbered push2 nodes, Tencent uses its IPv6 endpoint, Tonghuashun (no IPv6) is skipped
+IPV6_ONLY=false # optional; true on IPv6-only hosts: Eastmoney quotes use IPv6-capable numbered push2 nodes, Tencent uses its IPv6 endpoint, Tonghuashun (no IPv6) is skipped, so K-lines fall back to CLS (complete fields) and then Tencent
 FUND_FLOW_WINDOWS=尾盘@14:30-15:00 # optional; intraday fund-flow alert windows as label@HH:MM-HH:MM, comma-separated (e.g. add 开盘@09:30-10:00)
 FUND_FLOW_POLL_MINUTES=1 # optional
 FUND_FLOW_MIN_AMOUNT_WAN=5000 # optional; minimum change in main-force net inflow within the window (10k CNY)
@@ -54,7 +54,7 @@ bin/               entry points (bot-poller, bot-server, scheduler, scan, daily-
 src/config.js      all environment variables
 src/lib/           HTTP client/proxy, retry, concurrency pool, rate limiter
 src/gateways/      Telegram Bot API client
-src/models/        data: Postgres repositories, stock codes, market data (Eastmoney → Tonghuashun → Tencent), news, Dragon-Tiger list, trading calendar
+src/models/        data: Postgres repositories, stock codes, market data (Eastmoney → Tonghuashun → CLS → Tencent), news, Dragon-Tiger list, trading calendar
 src/services/      business logic: technical analysis, screening, daily report, scan, report delivery, bot setup
 src/views/         presentation: Telegram message text, bot replies, stock-name links (stock-link.js: names link to Eastmoney, codes copyable), PNG charts (Chinese charts use @napi-rs/canvas)
 src/controllers/   input handling: bot commands, webhook HTTP, daily delivery scheduler

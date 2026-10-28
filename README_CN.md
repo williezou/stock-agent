@@ -39,7 +39,7 @@ PUBLIC_BASE_URL=https://你的服务域名
 HTTP_PROXY=   # 可选
 HTTPS_PROXY=  # 可选
 NEWSNOW_BASE_URL= # 可选，默认 https://newsnow.busiyi.world
-IPV6_ONLY=false # 可选；纯IPv6主机设为true：东方财富实时行情改用带IPv6的编号节点、腾讯改用IPv6入口，跳过没有IPv6的同花顺（龙虎榜与席位只用东方财富）
+IPV6_ONLY=false # 可选；纯IPv6主机设为true：东方财富实时行情改用带IPv6的编号节点、腾讯改用IPv6入口，跳过没有IPv6的同花顺，日K依次改用财联社（字段完整）、腾讯（龙虎榜与席位只用东方财富）
 FUND_FLOW_WINDOWS=尾盘@14:30-15:00 # 可选；资金异动监控时间段，多个用逗号分隔，如再加 开盘@09:30-10:00
 FUND_FLOW_POLL_MINUTES=1 # 可选；每几分钟拉一次资金流排行
 FUND_FLOW_MIN_AMOUNT_WAN=5000 # 可选；区间主力净额变化的金额门槛（万元）
@@ -52,7 +52,7 @@ bin/               入口脚本（bot-poller、bot-server、scheduler、scan、d
 src/config.js      集中读取全部环境变量
 src/lib/           HTTP客户端/代理、重试、并发池、限流
 src/gateways/      Telegram Bot API 客户端
-src/models/        M：数据库仓储、股票代码、行情数据（东方财富→同花顺→腾讯）、新闻、龙虎榜、交易日历
+src/models/        M：数据库仓储、股票代码、行情数据（东方财富→同花顺→财联社→腾讯）、新闻、龙虎榜、交易日历
 src/services/      业务逻辑：技术分析、选股、每日收盘报告、A股扫描、报告推送、机器人配置
 src/views/         V：Telegram消息文案、机器人回复、股票名称链接（stock-link.js：名称链接东方财富，代码可复制）、PNG图表（中文图表基于 @napi-rs/canvas）
 src/controllers/   C：机器人命令、Webhook HTTP、每日投递调度
