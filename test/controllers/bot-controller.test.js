@@ -41,6 +41,12 @@ function createMemoryStore(initial = [], registered = true) {
             subscriber.longhu_enabled = enabled;
             return true;
         },
+        async setFundFlowEnabled(chatId, enabled) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.fund_flow_enabled = enabled;
+            return true;
+        },
         async deactivateSubscriber(chatId) {
             const subscriber = subscribers.get(String(chatId));
             if (!subscriber) return false;
@@ -218,6 +224,18 @@ test("/longhu 切换龙虎榜推送，并支持 on/off 显式设置", async () =
     await controller.handleUpdate(privateMessage("/longhu maybe"));
     assert.match(sent.at(-1).text, /用法/);
     assert.equal((await store.getSubscriber(100)).longhu_enabled, true);
+});
+
+test("/flow 切换资金异动提醒，并支持 on/off 显式设置", async () => {
+    const { controller, sent, store } = setup();
+    await controller.handleUpdate(privateMessage("/flow"));
+    assert.equal((await store.getSubscriber(100)).fund_flow_enabled, false, "默认开启，首次切换为关闭");
+    assert.match(sent.at(-1).text, /已关闭资金异动提醒/);
+    await controller.handleUpdate(privateMessage("/flow 开启"));
+    assert.equal((await store.getSubscriber(100)).fund_flow_enabled, true);
+    assert.match(sent.at(-1).text, /已开启资金异动提醒/);
+    await controller.handleUpdate(privateMessage("/flow maybe"));
+    assert.match(sent.at(-1).text, /用法/);
 });
 
 test("点击龙虎榜深层链接：订阅者收到席位明细，未订阅者不会被当作邀请码注册", async () => {

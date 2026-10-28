@@ -9,11 +9,15 @@ const HEADERS = {
     "Referer": "https://quote.eastmoney.com/"
 };
 
-// push2.eastmoney.com 没有IPv6；纯IPv6网络下改用接口相同、带IPv6的编号节点 1~100.push2，
+// 接口与 push2.eastmoney.com 相同的编号节点 1~100.push2（同时有IPv4与IPv6），
 // 每次请求随机选一个节点以分散限流，重试时也会换到另一个节点
+function push2NodeUrl(path, random = Math.random) {
+    return `https://${1 + Math.floor(random() * PUSH2_NODE_COUNT)}.push2.eastmoney.com${path}`;
+}
+
+// push2.eastmoney.com 没有IPv6；纯IPv6网络下改用编号节点
 function push2Url(path, random = Math.random) {
-    const host = config.ipv6Only ? `${1 + Math.floor(random() * PUSH2_NODE_COUNT)}.push2.eastmoney.com` : "push2.eastmoney.com";
-    return `https://${host}${path}`;
+    return config.ipv6Only ? push2NodeUrl(path, random) : `https://push2.eastmoney.com${path}`;
 }
 
 function toSecId(symbol) {
@@ -76,4 +80,4 @@ function createEastmoneySource({ httpClient, requestWithRetry }) {
     return { name: "东方财富", getDailyKline, getStockProfile };
 }
 
-module.exports = { HEADERS, createEastmoneySource, parseKlines, push2Url, toSecId };
+module.exports = { HEADERS, createEastmoneySource, parseKlines, push2NodeUrl, push2Url, toSecId };

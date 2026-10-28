@@ -9,6 +9,7 @@ A-share stock scanner with multi-style rankings, Telegram notifications, and a m
 - Telegram notification with clickable links
 - Weekday 15:30 Asia/Shanghai close reports for a dynamic watchlist, initially seeded with Yili and Sciyon Wisdom
 - Dragon-Tiger list (龙虎榜) pushed separately once the exchanges finish publishing it in the evening (checked 17:30-20:30): a Chinese chart of the top 10 net buyers / top 5 net sellers, with stock-name buttons below it that reply with that stock's broker-seat table; toggle with `/longhu`
+- Intraday fund-flow alerts (default tail session 14:30-15:00): polls both ends of Eastmoney's main-force net inflow ranking (100 each) every minute and pushes stocks whose net inflow changed by at least 50M CNY and 2% of the day's turnover since the window began; watchlist stocks are starred, windows are configurable, toggle with `/flow`. Main-force inflow is Eastmoney's estimate, not official exchange data
 - Stock names in pushes are followed by 🔴 🌸 icons linking to the Eastmoney / Tonghuashun mobile quote pages (which can open the apps)
 - MA/MACD/RSI/KDJ/Bollinger, volume-price, support/resistance, catalysts, and conditional trade plans
 - Telegram delivery includes a two-stock dashboard plus 30-day candlestick/volume charts with MA5/MA20, Bollinger bands, and support/resistance overlays
@@ -38,6 +39,10 @@ PUBLIC_BASE_URL=https://your-service.example
 HTTP_PROXY=   # optional
 HTTPS_PROXY=  # optional
 IPV6_ONLY=false # optional; true on IPv6-only hosts: Eastmoney quotes use IPv6-capable numbered push2 nodes, Tencent uses its IPv6 endpoint, Tonghuashun (no IPv6) is skipped
+FUND_FLOW_WINDOWS=尾盘@14:30-15:00 # optional; intraday fund-flow alert windows as label@HH:MM-HH:MM, comma-separated (e.g. add 开盘@09:30-10:00)
+FUND_FLOW_POLL_MINUTES=1 # optional
+FUND_FLOW_MIN_AMOUNT_WAN=5000 # optional; minimum change in main-force net inflow within the window (10k CNY)
+FUND_FLOW_MIN_RATIO_PCT=2 # optional; the same change as % of the day's turnover
 ```
 
 > `FINNHUB_API_KEY` is no longer used but can be kept empty.
@@ -86,7 +91,7 @@ docker compose run --rm bot npm run bot:menu
 
 Use `docker compose ps` and `docker compose logs -f bot scheduler` to inspect the services. `docker compose down` keeps the database volume; adding `--volumes` removes it. The containers use `http://host.docker.internal:6152` as the default proxy; override `DOCKER_PROXY_URL` when needed. The image build also sends `npm ci` through that proxy (keep it running while building), installs a Chinese font (WenQuanYi Micro Hei) for the Dragon-Tiger charts, and fetches apt packages directly from the USTC mirror (override with `--build-arg APT_MIRROR=...`). Close reports and the Dragon-Tiger list are scheduled locally; the A-share scan is scheduled on GitHub Actions, so nothing is sent twice.
 
-Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist. `/longhu` (or `/longhu on|off`) toggles the evening Dragon-Tiger list push, which is on by default. Tapping a stock-name button under the Dragon-Tiger chart replies with that stock's broker-seat table (the same stock is not re-sent within 60 seconds).
+Each person starts a private subscription with `/start INVITE_CODE` when `BOT_INVITE_CODE` is configured, or plain `/start` when `BOT_OPEN_REGISTRATION=true`. With neither set, only the admin (`TELEGRAM_CHAT_ID`) can register. The admin bypasses the invite code and `MAX_SUBSCRIBERS`; group chats are ignored. Watchlists and delivery state are isolated by Telegram chat. The scheduler analyzes the union of symbols once, then sends each subscriber only their own report. `/stop` pauses delivery without deleting the watchlist. `/longhu` (or `/longhu on|off`) toggles the evening Dragon-Tiger list push, which is on by default. `/flow` (or `/flow on|off`) toggles the intraday fund-flow alerts, also on by default. Tapping a stock-name button under the Dragon-Tiger chart replies with that stock's broker-seat table (the same stock is not re-sent within 60 seconds).
 
 ### Render deployment (optional)
 

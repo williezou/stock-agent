@@ -13,7 +13,7 @@ function createSubscriberRepository(pool) {
                 first_name = COALESCE(EXCLUDED.first_name, telegram_subscribers.first_name),
                 status = 'active',
                 updated_at = NOW()
-             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled`,
+             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled`,
             [
                 String(chatId),
                 userId === undefined || userId === null ? null : String(userId),
@@ -25,7 +25,7 @@ function createSubscriberRepository(pool) {
 
     async function getSubscriber(chatId) {
         const result = await pool.query(
-            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled
+            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled
              FROM telegram_subscribers WHERE chat_id = $1`,
             [String(chatId)]
         );
@@ -67,6 +67,24 @@ function createSubscriberRepository(pool) {
         return result.rowCount > 0;
     }
 
+    async function setFundFlowEnabled(chatId, enabled) {
+        const result = await pool.query(
+            "UPDATE telegram_subscribers SET fund_flow_enabled = $2, updated_at = NOW() WHERE chat_id = $1",
+            [String(chatId), Boolean(enabled)]
+        );
+        return result.rowCount > 0;
+    }
+
+    // 资金异动提醒的接收者：开启该提醒的活跃订阅者（盘中多次推送，不经过每日投递任务表）
+    async function listFundFlowSubscribers() {
+        const result = await pool.query(
+            `SELECT chat_id FROM telegram_subscribers
+             WHERE status = 'active' AND fund_flow_enabled = TRUE
+             ORDER BY created_at, chat_id`
+        );
+        return result.rows;
+    }
+
     // 确保记录存在但不改变已有状态（不覆盖用户的/stop或被屏蔽后的停用）
     async function ensureSubscriber(chatId) {
         await pool.query(
@@ -77,7 +95,15 @@ function createSubscriberRepository(pool) {
         );
     }
 
-    return { deactivateSubscriber, ensureSubscriber, getSubscriber, registerSubscriber, setLonghuEnabled };
+    return {
+        deactivateSubscriber,
+        ensureSubscriber,
+        getSubscriber,
+        listFundFlowSubscribers,
+        registerSubscriber,
+        setFundFlowEnabled,
+        setLonghuEnabled
+    };
 }
 
 module.exports = { createSubscriberRepository };

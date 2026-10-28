@@ -4,6 +4,12 @@ require("dotenv").config();
 // 使用getter在每次访问时读取，运行期修改的环境变量（如测试中设置）也能生效
 const env = process.env;
 
+// 数值配置：未设置或不是正数时用默认值，避免填错后轮询间隔或门槛悄悄失效
+function positiveNumber(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
 const config = {
     telegram: {
         get botToken() { return env.TELEGRAM_BOT_TOKEN || ""; },
@@ -32,6 +38,14 @@ const config = {
     scheduler: {
         get checkIntervalMs() { return Number(env.SCHEDULER_CHECK_INTERVAL_MS || 30000); },
         get maxAttempts() { return Number(env.DAILY_CLOSE_MAX_ATTEMPTS || 12); }
+    },
+    // 资金异动提醒：时间段“名称@HH:MM-HH:MM”，多个用逗号分隔（如再加“开盘@09:30-10:00”）；
+    // 区间主力净额变化同时达到金额（万元）与占当日成交额比例（%）两个门槛才推送
+    fundFlow: {
+        get windows() { return env.FUND_FLOW_WINDOWS || "尾盘@14:30-15:00"; },
+        get pollMinutes() { return Math.ceil(positiveNumber(env.FUND_FLOW_POLL_MINUTES, 1)); },
+        get minAmount() { return positiveNumber(env.FUND_FLOW_MIN_AMOUNT_WAN, 5000) * 10000; },
+        get minRatio() { return positiveNumber(env.FUND_FLOW_MIN_RATIO_PCT, 2) / 100; }
     },
     get debug() { return env.DEBUG === "1" || env.DEBUG === "true"; }
 };

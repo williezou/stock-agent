@@ -27,6 +27,15 @@ function isCommand(text, ...commands) {
     return new RegExp(`^/(?:${commands.join("|")})(?:@\\w+)?$`, "i").test(text);
 }
 
+// 推送开关参数：空参数时在当前状态上切换（数据库字段默认开启），on/off 显式设置，无法识别时返回null
+function parseToggle(argument, current) {
+    const choice = argument.trim().toLowerCase();
+    if (!choice) return current === false;
+    if (["on", "开", "开启"].includes(choice)) return true;
+    if (["off", "关", "关闭"].includes(choice)) return false;
+    return null;
+}
+
 // Telegram机器人控制器：处理私聊消息与内联按钮回调，管理订阅与自选股
 function createBotController({
     store,
@@ -141,14 +150,18 @@ function createBotController({
 
     // /longhu 切换，/longhu on|off 显式设置
     async function setLonghuPush(chatId, argument, subscriber) {
-        const choice = argument.trim().toLowerCase();
-        let enabled;
-        if (!choice) enabled = subscriber.longhu_enabled === false;
-        else if (["on", "开", "开启"].includes(choice)) enabled = true;
-        else if (["off", "关", "关闭"].includes(choice)) enabled = false;
-        else return reply(chatId, MESSAGES.invalidLonghuArgument);
+        const enabled = parseToggle(argument, subscriber.longhu_enabled);
+        if (enabled === null) return reply(chatId, MESSAGES.invalidLonghuArgument);
         await store.setLonghuEnabled(chatId, enabled);
         return reply(chatId, view.longhuToggledText(enabled));
+    }
+
+    // /flow 切换，/flow on|off 显式设置
+    async function setFundFlowPush(chatId, argument, subscriber) {
+        const enabled = parseToggle(argument, subscriber.fund_flow_enabled);
+        if (enabled === null) return reply(chatId, MESSAGES.invalidFlowArgument);
+        await store.setFundFlowEnabled(chatId, enabled);
+        return reply(chatId, view.fundFlowToggledText(enabled));
     }
 
     // 龙虎榜推送里点击股票名称（t.me 深层链接）后，回复该股当日的买卖席位明细
@@ -228,6 +241,8 @@ function createBotController({
 
         const longhuArgument = commandArgument(text, "longhu");
         if (longhuArgument !== null) return setLonghuPush(chatId, longhuArgument, subscriber);
+        const flowArgument = commandArgument(text, "flow");
+        if (flowArgument !== null) return setFundFlowPush(chatId, flowArgument, subscriber);
 
         const addArgument = commandArgument(text, "add");
         if (addArgument !== null) return addArgument ? addStock(chatId, addArgument) : promptAdd(chatId);

@@ -176,6 +176,11 @@ test("东方财富push2：默认用主域名，纯IPv6时改用带IPv6的编号�
     });
 });
 
+test("东方财富编号节点：不受IPV6_ONLY影响，始终随机选1~100", () => {
+    const { push2NodeUrl } = require("../../src/models/market/sources/eastmoney");
+    assert.equal(push2NodeUrl("/api/qt/clist/get", () => 0.5), "https://51.push2.eastmoney.com/api/qt/clist/get");
+});
+
 test("纯IPv6：行情跳过同花顺，东方财富失败直接切换腾讯IPv6入口", async () => {
     await withIpv6Only(async () => {
         const urls = [];

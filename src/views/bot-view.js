@@ -8,6 +8,7 @@ const BOT_COMMANDS = [
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
     { command: "longhu", description: "开启/关闭龙虎榜推送" },
+    { command: "flow", description: "开启/关闭盘中资金异动提醒" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
 ];
@@ -19,7 +20,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜推送";
+const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜推送\n/flow 开启/关闭盘中资金异动提醒";
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -45,6 +46,7 @@ const MESSAGES = {
     operationFailed: "❌ 操作失败，请稍后重试。",
     seatPending: "正在生成席位表格，请稍候…",
     seatRecentlySent: "席位已发送，请查看上方消息",
+    invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
@@ -89,6 +91,12 @@ function longhuToggledText(enabled) {
         : "已关闭龙虎榜推送，自选股收盘报告不受影响。发送 /longhu on 可重新开启。";
 }
 
+function fundFlowToggledText(enabled) {
+    return enabled
+        ? "✅ 已开启资金异动提醒：交易日盘中监控时段内（默认尾盘14:30-15:00）主力资金明显加速流入/流出的股票会即时推送。发送 /flow off 可关闭。"
+        : "已关闭资金异动提醒，其他推送不受影响。发送 /flow on 可重新开启。";
+}
+
 function removeChoicesMarkup(targets) {
     const inlineKeyboard = targets.map(target => [{
         text: `删除 ${target.symbol} ${target.name}`,
@@ -120,6 +128,7 @@ module.exports = {
     alreadyTrackedText,
     confirmRemoveMarkup,
     confirmRemoveText,
+    fundFlowToggledText,
     longhuToggledText,
     removeChoicesMarkup,
     removeKeyboardMarkup,
