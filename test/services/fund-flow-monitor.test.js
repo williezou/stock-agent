@@ -4,7 +4,7 @@ const { parseFlowRows } = require("../../src/models/market/fund-flow");
 const { FundFlowMonitor, detectSurges, takeBaseline } = require("../../src/services/fund-flow-monitor");
 const { createMonitors, prepareDelivery } = require("../../src/controllers/fund-flow-controller");
 const { generateFundFlowChart } = require("../../src/views/charts/fund-flow-chart");
-const { formatFundFlowAlert, formatFundFlowCaption, formatFundFlowKeyboard } = require("../../src/views/fund-flow-view");
+const { formatFundFlowAlert, formatFundFlowCaption } = require("../../src/views/fund-flow-view");
 
 // 北京时间 = UTC + 8；2026-10-28 是周三
 const at = hhmm => {
@@ -102,7 +102,7 @@ test("监控流程：首轮建起点，之后推送异动；同一分钟不重�
     assert.deepEqual(first.content.inflow.map(r => r.symbol), ["A"], "B 只增加1000万，未达门槛");
     assert.equal(first.content.since, "14:30");
     assert.match(first.text, /尾盘资金异动｜14:31/);
-    assert.match(first.text, /⭐ 自选股：股A <b>\+2\.00亿<\/b>/);
+    assert.match(first.text, /⭐股A .*<b>\+2\.00亿<\/b>/);
     assert.match(first.text, /非交易所官方口径/);
     assert.doesNotMatch(second.text, /⭐/);
 
@@ -139,25 +139,24 @@ test("监控流程：跨天后重新建立起点", async () => {
 });
 
 const CONTENT = {
+    // 东方财富名称带补齐空格
     label: "尾盘",
     time: "14:45",
     since: "14:30",
     inflow: [{ ...row("300308", 1.75e9, 1.3e10, { name: "中际旭创", changePct: 8.27 }), delta: 8.75e8, estimated: false }],
-    outflow: [{ ...row("000858", -6.2e8, 3.5e9, { name: "五粮液", changePct: -6.04 }), delta: -7.951e7, estimated: true }]
+    outflow: [{ ...row("000858", -6.2e8, 3.5e9, { name: "五 粮 液", changePct: -6.04 }), delta: -7.951e7, estimated: true }]
 };
 
-test("推送视图：图片说明列出命中的自选股，按钮流入在前、自选股加⭐，文字版区间变化在前", () => {
+test("推送视图：图片说明列出股票（自选股加⭐、名称去空格、可跳转App），文字版附涨跌幅", () => {
     const watchSymbols = new Set(["000858"]);
     const caption = formatFundFlowCaption({ ...CONTENT, watchSymbols });
     assert.match(caption, /<b>🚨 尾盘资金异动｜14:45<\/b>\n较14:30：主力加速流入1只、加速流出1只/);
-    assert.match(caption, /⭐ 自选股：五粮液 <b>≤-7951万<\/b>/);
-    assert.deepEqual(formatFundFlowKeyboard({ ...CONTENT, watchSymbols }).inline_keyboard, [
-        [{ text: "🔺中际旭创", url: "https://wap.eastmoney.com/quote/stock/0.300308.html" }],
-        [{ text: "⭐五粮液", url: "https://wap.eastmoney.com/quote/stock/0.000858.html" }]
-    ]);
+    assert.match(caption, /<b>🔺 主力加速流入<\/b>\n中际旭创 <a href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.300308\.html">🔴<\/a> .*<b>\+8\.75亿<\/b>\n/);
+    assert.match(caption, /<b>🔻 主力加速流出<\/b>\n⭐五粮液 .*<b>≤-7951万<\/b>\n/);
+    assert.doesNotMatch(caption, /<code>|-6\.04%/, "图片说明不带代码和涨跌幅");
+    assert.match(caption, /非交易所官方口径/);
     const text = formatFundFlowAlert({ ...CONTENT, watchSymbols });
-    assert.match(text, /1\. <b>\+8\.75亿<\/b> 中际旭创/);
-    assert.match(text, /1\. <b>≤-7951万<\/b> ⭐五粮液/);
+    assert.match(text, /⭐五粮液 .*<b>≤-7951万<\/b> -6\.04%/);
 });
 
 test("资金异动图表生成有效PNG", () => {
@@ -170,7 +169,7 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
     const send = prepareDelivery(CONTENT, {
         render: () => Buffer.from("png"),
         async sendPhoto(chatId, photo, caption, filename, options) {
-            photos.push({ chatId, photo, filename, keyboard: options.replyMarkup });
+            photos.push({ chatId, photo, filename, caption, options });
             return { photo: [{ file_id: "small" }, { file_id: "large" }] };
         },
         async sendMessage() { throw new Error("不应发文字"); }
@@ -180,7 +179,8 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
     assert.ok(Buffer.isBuffer(photos[0].photo));
     assert.equal(photos[0].filename, "fund-flow-1445.png");
     assert.equal(photos[1].photo, "large");
-    assert.equal(photos[1].keyboard.inline_keyboard[0][0].text, "⭐中际旭创");
+    assert.equal(photos[0].options, undefined, "不带按钮");
+    assert.match(photos[1].caption, /⭐中际旭创/);
 
     const texts = [];
     const fallback = prepareDelivery(CONTENT, {

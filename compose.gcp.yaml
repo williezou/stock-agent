@@ -2,6 +2,8 @@
 # - 去掉本机代理，apt 改用 Debian 官方源
 # - 镜像改从 Docker Hub 拉取（public.ecr.aws 没有IPv6）
 # - IPV6_ONLY：行情走有IPv6的接口入口，跳过同花顺
+# - Docker 默认网络只有IPv4：宿主机 /etc/docker/daemon.json 需开启IPv6（构建时的默认网桥用），
+#   运行时给 compose 网络开启IPv6（需 Docker 27+）
 # 用法：docker compose -f compose.yaml -f compose.gcp.yaml up -d --build
 x-cloud: &cloud
   build:
@@ -25,3 +27,7 @@ services:
 
   scheduler:
     <<: *cloud
+
+networks:
+  default:
+    enable_ipv6: true

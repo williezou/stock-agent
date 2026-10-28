@@ -1,11 +1,10 @@
 const { escapeHtml, signed } = require("./format");
-const { StockLink } = require("./stock-link");
+const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
-// 资金异动推送：图表（区间主力净额变化条形图）+ 图片说明（概况、命中的自选股）+ 股票名称按钮；
+// 资金异动推送：图表（区间主力净额变化条形图）+ 图片说明（概况与股票列表，名称可跳转App）；
 // 图表生成失败时退回文字版
 const SOURCE_NOTE = "主力净流入为东方财富按超大单、大单估算的数据，非交易所官方口径；仅供参考，不构成投资建议。";
 const OPT_OUT_NOTE = "发送 /flow off 可关闭资金异动提醒。";
-const KEYBOARD_COLUMNS = 4;
 
 // 金额紧凑写法：+8.75亿 / -7951万
 function signedAmount(value) {
@@ -29,53 +28,31 @@ function summaryText({ since, inflow, outflow }) {
     return `较${since}：主力加速流入${inflow.length}只、加速流出${outflow.length}只`;
 }
 
-function watchedRows({ inflow, outflow, watchSymbols = new Set() }) {
-    return [...inflow, ...outflow].filter(row => watchSymbols.has(row.symbol));
-}
-
-function formatFundFlowCaption(content) {
-    const lines = [`<b>🚨 ${escapeHtml(titleText(content))}</b>`, summaryText(content)];
-    const watched = watchedRows(content);
-    if (watched.length) {
-        lines.push(`⭐ 自选股：${watched.map(row => `${escapeHtml(row.name)} <b>${deltaText(row)}</b>`).join("，")}`);
-    }
-    lines.push(`<i>点下方股票名称打开东方财富行情（🔺流入 🔻流出）。${SOURCE_NOTE}${OPT_OUT_NOTE}</i>`);
-    return lines.join("\n");
-}
-
-function chunk(items, size) {
-    const rows = [];
-    for (let i = 0; i < items.length; i += size) rows.push(items.slice(i, i + size));
-    return rows;
-}
-
-// 图片下方的股票按钮：流入在前、流出另起一行，顺序与图中一致；自选股名称前加 ⭐
-function formatFundFlowKeyboard({ inflow, outflow, watchSymbols = new Set() }) {
-    const button = mark => row => ({
-        text: `${watchSymbols.has(row.symbol) ? "⭐" : mark}${row.name}`,
-        url: StockLink.of(row).appUrl("eastmoney")
-    });
-    return {
-        inline_keyboard: [
-            ...chunk(inflow.map(button("🔺")), KEYBOARD_COLUMNS),
-            ...chunk(outflow.map(button("🔻")), KEYBOARD_COLUMNS)
-        ]
-    };
-}
-
-// 文字版（图表生成失败时的后备）：每只股票一行，区间变化放在最前面
-function textLine(row, index, watchSymbols) {
+// 每只股票一行：自选股加 ⭐，名称后的 🔴 🌸 可跳转App，区间变化加粗；detailed 时附当日涨跌幅（文字版没有图表可看）。
+// 东方财富的名称里有补齐用的空格（如“五 粮 液”），去掉以免占宽
+function stockLine(row, watchSymbols, detailed) {
     const star = watchSymbols.has(row.symbol) ? "⭐" : "";
-    return `${index + 1}. <b>${deltaText(row)}</b> ${star}${StockLink.of(row).html()} ${signed(row.changePct)}`;
+    const stock = new StockLink(row.symbol, row.name.replace(/\s+/g, "")).html({ code: false });
+    return `${star}${stock} <b>${deltaText(row)}</b>${detailed ? ` ${signed(row.changePct)}` : ""}`;
 }
 
-function formatFundFlowAlert(content) {
+function formatFundFlowText(content, detailed) {
     const { inflow, outflow, watchSymbols = new Set() } = content;
     const lines = [`<b>🚨 ${escapeHtml(titleText(content))}</b>`, summaryText(content)];
-    if (inflow.length) lines.push("", "<b>🔺 主力加速流入</b>", ...inflow.map((row, index) => textLine(row, index, watchSymbols)));
-    if (outflow.length) lines.push("", "<b>🔻 主力加速流出</b>", ...outflow.map((row, index) => textLine(row, index, watchSymbols)));
-    lines.push("", `<i>${SOURCE_NOTE}${OPT_OUT_NOTE}</i>`);
+    if (inflow.length) lines.push("", "<b>🔺 主力加速流入</b>", ...inflow.map(row => stockLine(row, watchSymbols, detailed)));
+    if (outflow.length) lines.push("", "<b>🔻 主力加速流出</b>", ...outflow.map(row => stockLine(row, watchSymbols, detailed)));
+    lines.push("", `<i>${STOCK_LINK_LEGEND}。${SOURCE_NOTE}${OPT_OUT_NOTE}</i>`);
     return lines.join("\n");
+}
+
+// 图片说明：股票列表与图中顺序一致，涨跌幅等明细看图
+function formatFundFlowCaption(content) {
+    return formatFundFlowText(content, false);
+}
+
+// 文字版（图表生成失败时的后备）
+function formatFundFlowAlert(content) {
+    return formatFundFlowText(content, true);
 }
 
 module.exports = {
@@ -83,7 +60,6 @@ module.exports = {
     deltaText,
     formatFundFlowAlert,
     formatFundFlowCaption,
-    formatFundFlowKeyboard,
     signedAmount,
     summaryText,
     titleText

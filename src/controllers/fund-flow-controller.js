@@ -5,7 +5,7 @@ const { createFundFlowService } = require("../models/market/fund-flow");
 const { isTradingDay } = require("../models/market/trading-calendar");
 const { FundFlowMonitor } = require("../services/fund-flow-monitor");
 const { generateFundFlowChart } = require("../views/charts/fund-flow-chart");
-const { formatFundFlowAlert, formatFundFlowCaption, formatFundFlowKeyboard } = require("../views/fund-flow-view");
+const { formatFundFlowAlert, formatFundFlowCaption } = require("../views/fund-flow-view");
 
 // 资金异动提醒控制器：按配置的时间段（FUND_FLOW_WINDOWS）各建一个监控实例，调度器每轮依次执行
 function createMonitors(fundFlowConfig = config.fundFlow) {
@@ -17,7 +17,7 @@ function createMonitors(fundFlowConfig = config.fundFlow) {
     }));
 }
 
-// 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），说明与按钮按各自自选股标 ⭐；
+// 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），图片说明按各自自选股标 ⭐；
 // 图表生成失败时退回文字版，保证不漏推
 function prepareDelivery(content, { render, sendPhoto, sendMessage }) {
     let png = null;
@@ -30,9 +30,7 @@ function prepareDelivery(content, { render, sendPhoto, sendMessage }) {
     return async (chatId, watchSymbols) => {
         const personal = { ...content, watchSymbols };
         if (!png) return sendMessage(chatId, formatFundFlowAlert(personal));
-        const message = await sendPhoto(chatId, fileId || png, formatFundFlowCaption(personal), `fund-flow-${content.time.replace(":", "")}.png`, {
-            replyMarkup: formatFundFlowKeyboard(personal)
-        });
+        const message = await sendPhoto(chatId, fileId || png, formatFundFlowCaption(personal), `fund-flow-${content.time.replace(":", "")}.png`);
         fileId = fileId || telegram.largestPhotoFileId(message);
     };
 }
