@@ -105,7 +105,9 @@ function createBotController({
     }
 
     async function showUsers(chatId) {
-        return reply(chatId, view.usersText(await store.listSubscriberSummaries(), maxSubscribers));
+        for (const text of view.usersMessages(await store.listSubscriberSummaries(), maxSubscribers)) {
+            await reply(chatId, text);
+        }
     }
 
     async function showList(chatId) {

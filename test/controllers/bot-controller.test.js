@@ -23,7 +23,7 @@ function createMemoryStore(initial = [], registered = true) {
         async getSubscriber(chatId) { return subscribers.get(String(chatId)) || null; },
         async listSubscriberSummaries() {
             return [...subscribers.values()].map(subscriber => ({
-                watch_count: bucket(subscriber.chat_id).size,
+                watchlist: [...bucket(subscriber.chat_id).values()].map(({ symbol, name }) => ({ symbol, name })),
                 created_date: "2026-10-28",
                 ...subscriber
             }));
@@ -248,6 +248,8 @@ test("/flow 切换资金异动提醒，并支持 on/off 显式设置", async () 
 test("/users 只对管理员生效：列出启用/停用人数、自选股数量与关闭的推送，管理员停用后也能查看", async () => {
     const { controller, sent, store } = setup([{ symbol: "600519", name: "贵州茅台" }], { adminChatId: "100" });
     await store.registerSubscriber({ chatId: 300, username: "friend", firstName: "A<b>" });
+    await store.upsert(300, { symbol: "600519", name: "贵州茅台" });
+    await store.upsert(300, { symbol: "300308", name: "中际旭创" });
     await store.setLonghuEnabled(300, false);
     await store.registerSubscriber({ chatId: 400, firstName: "Gone" });
     await store.deactivateSubscriber(400);
@@ -257,11 +259,25 @@ test("/users 只对管理员生效：列出启用/停用人数、自选股数量
     const text = sent.at(-1).text;
     assert.match(text, /订阅用户：启用 1\/\d+，停用 2/);
     assert.match(text, /开启龙虎榜 0 人，开启资金异动 1 人/);
-    assert.match(text, /1\. A&lt;b&gt;（@friend）\n　自选0只 · 龙虎榜关 · 2026-10-28/);
-    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 100\n　自选1只/);
+    assert.match(text, /自选股汇总（2只，按关注人数）<\/b>\n中际旭创 300308 · 1人\n贵州茅台 600519 · 1人/, "汇总只算启用用户（停用的管理员也关注了茅台）");
+    assert.match(text, /1\. A&lt;b&gt;（@friend）\n　自选2只 · 龙虎榜关 · 2026-10-28\n　贵州茅台、中际旭创/);
+    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 100\n　自选1只 · 2026-10-28\n　贵州茅台/);
 
     await controller.handleUpdate(privateMessage("/users", 300, 300));
     assert.doesNotMatch(sent.at(-1).text, /订阅用户/, "非管理员不能查看");
+});
+
+test("/users 人数多时自动拆成多条消息，每条都在Telegram长度上限内", () => {
+    const { usersMessages } = require("../../src/views/bot-view");
+    const { visibleLength } = require("../../src/lib/telegram-text");
+    const users = Array.from({ length: 80 }, (_, i) => ({
+        chat_id: String(i), first_name: `用户${i}`, status: "active", created_date: "2026-10-28",
+        watchlist: Array.from({ length: 10 }, (_, j) => ({ symbol: String(600000 + i * 10 + j), name: `股票名称${j}` }))
+    }));
+    const messages = usersMessages(users, 50);
+    assert.ok(messages.length > 1);
+    assert.ok(messages.every(text => visibleLength(text) <= 4096));
+    assert.equal(messages.join("\n").match(/^\d+\. 用户/gm).length, 80, "不丢人");
 });
 
 test("点击龙虎榜深层链接：订阅者收到席位明细，未订阅者不会被当作邀请码注册", async () => {

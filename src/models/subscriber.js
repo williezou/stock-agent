@@ -85,12 +85,13 @@ function createSubscriberRepository(pool) {
         return result.rows;
     }
 
-    // 管理员 /users：全部订阅者及其推送开关、启用中的自选股数量，按注册时间排序
+    // 管理员 /users：全部订阅者及其推送开关、启用中的自选股（按添加顺序），按注册时间排序
     async function listSubscriberSummaries() {
         const result = await pool.query(
             `SELECT s.chat_id, s.username, s.first_name, s.status, s.longhu_enabled, s.fund_flow_enabled,
                     to_char(s.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS created_date,
-                    (SELECT COUNT(*)::int FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE) AS watch_count
+                    COALESCE((SELECT json_agg(json_build_object('symbol', w.symbol, 'name', w.name) ORDER BY w.created_at, w.symbol)
+                              FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE), '[]'::json) AS watchlist
              FROM telegram_subscribers s
              ORDER BY s.created_at, s.chat_id`
         );
