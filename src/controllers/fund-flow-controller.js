@@ -18,8 +18,15 @@ function createMonitors(fundFlowConfig = config.fundFlow) {
 }
 
 // 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），图片说明按各自自选股标 ⭐；
-// 图表生成失败时退回文字版，保证不漏推
-function prepareDelivery(content, { render, sendPhoto, sendMessage }) {
+// 图表生成失败时退回文字版，保证不漏推。caption/text/filePrefix 默认为资金异动，量价异动传入自己的格式
+function prepareDelivery(content, {
+    render,
+    sendPhoto,
+    sendMessage,
+    caption = formatFundFlowCaption,
+    text = formatFundFlowAlert,
+    filePrefix = "fund-flow"
+}) {
     let png = null;
     try {
         png = render(content);
@@ -29,8 +36,8 @@ function prepareDelivery(content, { render, sendPhoto, sendMessage }) {
     let fileId = null;
     return async (chatId, watchSymbols) => {
         const personal = { ...content, watchSymbols };
-        if (!png) return sendMessage(chatId, formatFundFlowAlert(personal));
-        const message = await sendPhoto(chatId, fileId || png, formatFundFlowCaption(personal), `fund-flow-${content.time.replace(":", "")}.png`);
+        if (!png) return sendMessage(chatId, text(personal));
+        const message = await sendPhoto(chatId, fileId || png, caption(personal), `${filePrefix}-${content.time.replace(":", "")}.png`);
         fileId = fileId || telegram.largestPhotoFileId(message);
     };
 }

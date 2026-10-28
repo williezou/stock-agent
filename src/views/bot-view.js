@@ -11,7 +11,7 @@ const BOT_COMMANDS = [
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
     { command: "longhu", description: "开启/关闭龙虎榜推送" },
-    { command: "flow", description: "开启/关闭盘中资金异动提醒" },
+    { command: "flow", description: "开启/关闭盘中异动提醒（资金、量价）" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
 ];
@@ -30,7 +30,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜推送\n/flow 开启/关闭盘中资金异动提醒";
+const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜推送\n/flow 开启/关闭盘中异动提醒（资金异动、量价异动）";
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -178,8 +178,8 @@ function longhuToggledText(enabled) {
 
 function fundFlowToggledText(enabled) {
     return enabled
-        ? "✅ 已开启资金异动提醒：交易日盘中监控时段内（默认尾盘14:30-15:00）主力资金明显加速流入/流出的股票会即时推送。发送 /flow off 可关闭。"
-        : "已关闭资金异动提醒，其他推送不受影响。发送 /flow on 可重新开启。";
+        ? "✅ 已开启盘中异动提醒：交易日尾盘（默认14:30-15:00）主力资金明显加速流入/流出、盘中（默认9:30-11:30、13:00-14:57）几分钟内放量急涨急跌的股票会即时推送。发送 /flow off 可关闭。"
+        : "已关闭盘中异动提醒（资金异动、量价异动），其他推送不受影响。发送 /flow on 可重新开启。";
 }
 
 function subscriberLabel(subscriber) {

@@ -47,6 +47,13 @@ const config = {
         get minAmount() { return positiveNumber(env.FUND_FLOW_MIN_AMOUNT_WAN, 5000) * 10000; },
         get minRatio() { return positiveNumber(env.FUND_FLOW_MIN_RATIO_PCT, 2) / 100; }
     },
+    // 量价异动提醒：时间段格式同上（默认避开午休与深市收盘集合竞价）；回看分钟数内成交额（万元）与涨跌幅变化（个百分点）同时达到门槛才推送
+    volumeSpike: {
+        get windows() { return env.VOLUME_SPIKE_WINDOWS || "上午@09:30-11:30,下午@13:00-14:57"; },
+        get lookbackMinutes() { return Math.ceil(positiveNumber(env.VOLUME_SPIKE_LOOKBACK_MINUTES, 5)); },
+        get minAmount() { return positiveNumber(env.VOLUME_SPIKE_MIN_AMOUNT_WAN, 5000) * 10000; },
+        get minChangePct() { return positiveNumber(env.VOLUME_SPIKE_MIN_CHANGE_PCT, 2); }
+    },
     get debug() { return env.DEBUG === "1" || env.DEBUG === "true"; }
 };
 

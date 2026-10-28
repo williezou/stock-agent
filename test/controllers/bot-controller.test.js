@@ -255,10 +255,10 @@ test("/flow 切换资金异动提醒，并支持 on/off 显式设置", async () 
     const { controller, sent, store } = setup();
     await controller.handleUpdate(privateMessage("/flow"));
     assert.equal((await store.getSubscriber(100)).fund_flow_enabled, false, "默认开启，首次切换为关闭");
-    assert.match(sent.at(-1).text, /已关闭资金异动提醒/);
+    assert.match(sent.at(-1).text, /已关闭盘中异动提醒/);
     await controller.handleUpdate(privateMessage("/flow 开启"));
     assert.equal((await store.getSubscriber(100)).fund_flow_enabled, true);
-    assert.match(sent.at(-1).text, /已开启资金异动提醒/);
+    assert.match(sent.at(-1).text, /已开启盘中异动提醒/);
     await controller.handleUpdate(privateMessage("/flow maybe"));
     assert.match(sent.at(-1).text, /用法/);
 });
