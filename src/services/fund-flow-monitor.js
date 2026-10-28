@@ -17,13 +17,14 @@ function formatMinutes(minutes) {
     return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
-// 起点快照：记下两头榜单内股票的主力净额；未上榜股票的起点值只知道范围——
+// 起点快照（记下数据来源，后续只与同一来源的数据比较）：记下两头榜单内股票的主力净额；未上榜股票的起点值只知道范围——
 // 不在净流入前列说明 ≤ 净流入榜末位，不在净流出前列说明 ≥ 净流出榜末位，以此估算其变化的下限
 function takeBaseline(ranking, minute) {
     const flows = new Map();
     for (const row of [...ranking.inflow, ...ranking.outflow]) flows.set(row.symbol, row.mainNet);
     return {
         minute,
+        source: ranking.source,
         flows,
         inflowFloor: ranking.inflow.at(-1)?.mainNet ?? 0,
         outflowCeil: ranking.outflow.at(-1)?.mainNet ?? 0
@@ -108,22 +109,24 @@ class FundFlowMonitor {
 
         let ranking;
         try {
-            ranking = await deps.fundFlow.getRanking();
+            ranking = await deps.fundFlow.getRanking({ prefer: this.state.baseline?.source });
         } catch (error) {
             this.state.failures++;
             console.error(`⚠️ ${this.label}资金流排行获取失败：${formatError(error)}`);
             if (this.state.failures === FETCH_FAILURE_ALERT) {
                 await alertAdmin({ ...deps.alertContext, dateStr }, {
                     key: `${dateStr}:fund-flow-${this.label}`,
-                    text: `⚠️ ${this.label}资金异动：东方财富资金流排行连续${FETCH_FAILURE_ALERT}次获取失败（${formatError(error)}）。`
+                    text: `⚠️ ${this.label}资金异动：资金流排行连续${FETCH_FAILURE_ALERT}次获取失败（${formatError(error)}）。`
                 });
             }
             return { action: "fetch-failed" };
         }
         this.state.failures = 0;
-        if (!this.state.baseline) {
+        // 首次取到数据，或来源已切换（两家主力口径不同，不能跨来源比较）：以本次数据重新建立起点
+        if (!this.state.baseline || this.state.baseline.source !== ranking.source) {
+            const switched = this.state.baseline ? { switchedFrom: this.state.baseline.source } : {};
             this.state.baseline = takeBaseline(ranking, minute);
-            return { action: "waiting", baseline: formatMinutes(minute) };
+            return { action: "waiting", baseline: formatMinutes(minute), source: ranking.source, ...switched };
         }
 
         const surges = detectSurges(this.state.baseline, ranking, this.thresholds);
@@ -138,6 +141,7 @@ class FundFlowMonitor {
             label: this.label,
             time: formatMinutes(minute),
             since: formatMinutes(this.state.baseline.minute),
+            source: ranking.source,
             inflow,
             outflow
         };

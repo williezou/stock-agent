@@ -3,7 +3,10 @@ const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
 // 资金异动推送：图表（区间主力净额变化条形图）+ 图片说明（概况与股票列表，名称可跳转App）；
 // 图表生成失败时退回文字版
-const SOURCE_NOTE = "主力净流入为东方财富按超大单、大单估算的数据，非交易所官方口径；仅供参考，不构成投资建议。";
+// 主力净流入是数据商按大单估算的，各家口径不同，注明本次来源
+function sourceNote(source = "东方财富") {
+    return `主力净流入为${source}按大单估算的数据，非交易所官方口径；仅供参考，不构成投资建议。`;
+}
 const OPT_OUT_NOTE = "发送 /flow off 可关闭资金异动提醒。";
 
 // 金额紧凑写法：+8.75亿 / -7951万
@@ -41,7 +44,7 @@ function formatFundFlowText(content, detailed) {
     const lines = [`<b>🚨 ${escapeHtml(titleText(content))}</b>`, summaryText(content)];
     if (inflow.length) lines.push("", "<b>🔺 主力加速流入</b>", ...inflow.map(row => stockLine(row, watchSymbols, detailed)));
     if (outflow.length) lines.push("", "<b>🔻 主力加速流出</b>", ...outflow.map(row => stockLine(row, watchSymbols, detailed)));
-    lines.push("", `<i>${STOCK_LINK_LEGEND}。${SOURCE_NOTE}${OPT_OUT_NOTE}</i>`);
+    lines.push("", `<i>${STOCK_LINK_LEGEND}。${sourceNote(content.source)}${OPT_OUT_NOTE}</i>`);
     return lines.join("\n");
 }
 
@@ -56,11 +59,11 @@ function formatFundFlowAlert(content) {
 }
 
 module.exports = {
-    SOURCE_NOTE,
     deltaText,
     formatFundFlowAlert,
     formatFundFlowCaption,
     signedAmount,
+    sourceNote,
     summaryText,
     titleText
 };

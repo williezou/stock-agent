@@ -1,5 +1,5 @@
 const { createCanvas } = require("@napi-rs/canvas");
-const { SOURCE_NOTE, deltaText, signedAmount, summaryText, titleText } = require("../fund-flow-view");
+const { deltaText, signedAmount, sourceNote, summaryText, titleText } = require("../fund-flow-view");
 const { font } = require("./cjk-font");
 
 // 资金异动图表：主力加速流入（红）/加速流出（绿）两段横向条形图，条长按区间主力净额变化统一比例；
@@ -116,7 +116,7 @@ function generateFundFlowChart(content) {
 
     ctx.fillStyle = COLORS.muted;
     ctx.font = font(17);
-    ctx.fillText(SOURCE_NOTE, PADDING, height - 30);
+    ctx.fillText(sourceNote(content.source), PADDING, height - 30);
     return canvas.toBuffer("image/png");
 }
 

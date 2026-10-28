@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseFlowRows } = require("../../src/models/market/fund-flow");
+const { createFundFlowService, parseFlowRows, parseSinaFlowRows } = require("../../src/models/market/fund-flow");
 const { FundFlowMonitor, detectSurges, takeBaseline } = require("../../src/services/fund-flow-monitor");
 const { createMonitors, prepareDelivery } = require("../../src/controllers/fund-flow-controller");
 const { generateFundFlowChart } = require("../../src/views/charts/fund-flow-chart");
@@ -12,7 +12,7 @@ const at = hhmm => {
     return new Date(Date.UTC(2026, 9, 28, hour - 8, minute));
 };
 const row = (symbol, mainNet, amount = 1e9, extra = {}) => ({ symbol, name: `股${symbol}`, changePct: 1, amount, mainNet, mainRatio: 5, ...extra });
-const ranking = (inflow, outflow) => ({ inflow, outflow, size: inflow.length });
+const ranking = (inflow, outflow, source = "东方财富") => ({ source, inflow, outflow, size: inflow.length });
 
 test("解析资金流排行：字段映射，停牌股（字段为“-”）剔除", () => {
     const rows = parseFlowRows({ data: { diff: [
@@ -22,8 +22,43 @@ test("解析资金流排行：字段映射，停牌股（字段为“-”）剔�
     assert.equal(rows.length, 1);
     assert.deepEqual(rows[0], {
         symbol: "300308", name: "中际旭创", price: 619.73, changePct: 7.41, amount: 13278635375.3,
-        mainNet: 1608405824, mainRatio: 12.11, superNet: 1309660816, bigNet: 298745008
+        mainNet: 1608405824, mainRatio: 12.11
     });
+});
+
+test("解析新浪资金流向：去掉市场前缀，涨跌幅与主力占比由小数换算为%，null视为空", () => {
+    const rows = parseSinaFlowRows(JSON.stringify([
+        { symbol: "sz300308", name: "中际旭创", trade: "636.3000", changeratio: "0.102773", amount: "23572610782.0000", r0_net: "3388592392.5500", r0_ratio: "0.143751" }
+    ]));
+    assert.equal(rows[0].symbol, "300308");
+    assert.equal(rows[0].mainNet, 3388592392.55);
+    assert.ok(Math.abs(rows[0].changePct - 10.2773) < 1e-9);
+    assert.ok(Math.abs(rows[0].mainRatio - 14.3751) < 1e-9);
+    assert.deepEqual(parseSinaFlowRows("null"), []);
+    assert.throws(() => parseSinaFlowRows({ error: 1 }), /无法解析/);
+});
+
+test("资金流排行：东方财富失败时改用新浪；prefer 指定的来源优先", async () => {
+    const calls = [];
+    const source = (name, fail) => ({
+        name,
+        async fetchSide(descending) {
+            calls.push(`${name}:${descending ? "in" : "out"}`);
+            if (fail) throw new Error("socket hang up");
+            return [row(descending ? "A" : "B", descending ? 1 : -1)];
+        }
+    });
+    const service = createFundFlowService({ sources: [source("东方财富", true), source("新浪")] });
+    const first = await service.getRanking();
+    assert.equal(first.source, "新浪");
+    assert.deepEqual(calls, ["东方财富:in", "新浪:in", "新浪:out"]);
+
+    calls.length = 0;
+    await service.getRanking({ prefer: "新浪" });
+    assert.deepEqual(calls, ["新浪:in", "新浪:out"], "起点来自新浪时不再先试东方财富");
+
+    const down = createFundFlowService({ sources: [source("东方财富", true), source("新浪", true)] });
+    await assert.rejects(down.getRanking(), /东方财富：socket hang up；新浪：socket hang up/);
 });
 
 test("时间段参数：解析“名称@HH:MM-HH:MM”，结束分钟包含在内，格式错误时报错", () => {
@@ -64,7 +99,7 @@ function setup({ snapshots, subscribers = [{ chat_id: "100" }, { chat_id: "200" 
     const calls = { messages: [], alerts: [], deactivated: [], fetches: 0 };
     const deps = {
         fundFlow: {
-            async getRanking() {
+            async getRanking(options) {
                 if (fetchError) throw fetchError;
                 return snapshots[Math.min(calls.fetches++, snapshots.length - 1)];
             }
@@ -90,7 +125,7 @@ test("监控流程：首轮建起点，之后推送异动；同一分钟不重�
     const { calls, deps, monitor } = setup({ snapshots: [base, surged, surged] });
 
     assert.deepEqual(await monitor.tick(at("14:29"), deps), { action: "outside-window" });
-    assert.deepEqual(await monitor.tick(at("14:30"), deps), { action: "waiting", baseline: "14:30" });
+    assert.deepEqual(await monitor.tick(at("14:30"), deps), { action: "waiting", baseline: "14:30", source: "东方财富" });
     assert.deepEqual(await monitor.tick(at("14:30"), deps), { action: "waiting" }, "同一分钟不再拉取");
     assert.equal(calls.fetches, 1);
 
@@ -131,11 +166,29 @@ test("监控流程：排行连续3次获取失败时提醒管理员一次", asyn
     assert.match(calls.alerts[0], /尾盘资金异动.*连续3次/);
 });
 
+test("监控流程：数据来源切换时以新来源重新建立起点，不跨来源比较；推送注明来源", async () => {
+    const { calls, deps, monitor } = setup({ snapshots: [
+        ranking([row("A", 0)], []),
+        ranking([row("A", 5e8)], [], "新浪"),
+        ranking([row("A", 8e8)], [], "新浪")
+    ] });
+    const prefers = [];
+    const getRanking = deps.fundFlow.getRanking;
+    deps.fundFlow.getRanking = options => { prefers.push(options.prefer); return getRanking(options); };
+    await monitor.tick(at("14:30"), deps);
+    assert.deepEqual(await monitor.tick(at("14:31"), deps), { action: "waiting", baseline: "14:31", source: "新浪", switchedFrom: "东方财富" });
+    assert.equal(calls.messages.length, 0, "跨来源的差值不推送");
+    assert.equal((await monitor.tick(at("14:32"), deps)).action, "processed");
+    assert.deepEqual(prefers, [undefined, "东方财富", "新浪"]);
+    assert.equal(calls.messages[0].content.source, "新浪");
+    assert.match(calls.messages[0].text, /主力净流入为新浪按大单估算/);
+});
+
 test("监控流程：跨天后重新建立起点", async () => {
     const { deps, monitor } = setup({ snapshots: [ranking([row("A", 0)], [])] });
     await monitor.tick(at("14:30"), deps);
     const nextDay = new Date(at("14:30").getTime() + 24 * 3600 * 1000);
-    assert.deepEqual(await monitor.tick(nextDay, deps), { action: "waiting", baseline: "14:30" });
+    assert.deepEqual(await monitor.tick(nextDay, deps), { action: "waiting", baseline: "14:30", source: "东方财富" });
 });
 
 const CONTENT = {
