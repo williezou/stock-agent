@@ -19,7 +19,7 @@ test("龙虎榜消息包含分市场统计、净买入/净卖出排行与关闭�
     assert.match(text, /上榜15只（沪12 深2 北1）/);
     assert.match(text, /净买入前10/);
     assert.match(text, /净卖出前2/);
-    assert.match(text, /1\. <a href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.000001\.html">股票000001<\/a> <a href="https:\/\/data\.eastmoney\.com\/stock\/lhb,2026-10-27,000001\.html">📋<\/a> <code>000001<\/code> -9\.90%｜净额 -2\.00亿元/);
+    assert.match(text, /1\. <a href="https:\/\/mlink\.eastmoney\.com\/h52n\/nlink\.html\?type=localurl&amp;id=eastmoney%3A%2F%2Fpage%2Fstockpage%3Fcode%3D000001%26market%3D0">股票000001<\/a> <a href="https:\/\/data\.eastmoney\.com\/stock\/lhb,2026-10-27,000001\.html">📋<\/a> <code>000001<\/code> -9\.90%｜净额 -2\.00亿元/);
     assert.match(text, /\/longhu off/);
     assert.ok(text.indexOf("600100") < text.indexOf("600101"));
     assert.doesNotMatch(text, /600111/, "第12名不在净买入前10");
@@ -111,7 +111,7 @@ test("席位明细：营业部名称精简、金额紧凑、附手机版行情�
     assert.match(text, /<a href="[^"]+"><b>大洋电机<\/b><\/a> <code>002249<\/code> \+10\.00%/);
     assert.match(text, /📌 <b>日涨幅偏离7%<\/b>/);
     assert.match(text, /1\. 国泰海通证券武汉紫阳东路\n　买1\.22亿 卖4万 净\+1\.22亿/);
-    assert.match(text, /href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.002249\.html">东方财富/);
+    assert.match(text, /href="https:\/\/mlink\.eastmoney\.com\/h52n\/nlink\.html\?type=localurl&amp;id=eastmoney%3A%2F%2Fpage%2Fstockpage%3Fcode%3D002249%26market%3D0">东方财富/);
     assert.match(text, /href="https:\/\/m\.10jqka\.com\.cn\/stockpage\/hs_002249\/">同花顺/);
     assert.match(text, /lhb,2026-10-27,002249\.html">电脑版龙虎榜详情/);
 });

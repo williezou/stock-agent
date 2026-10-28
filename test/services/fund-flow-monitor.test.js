@@ -151,7 +151,7 @@ test("推送视图：图片说明列出股票（自选股加⭐、名称去空�
     const watchSymbols = new Set(["000858"]);
     const caption = formatFundFlowCaption({ ...CONTENT, watchSymbols });
     assert.match(caption, /<b>🚨 尾盘资金异动｜14:45<\/b>\n较14:30：主力加速流入1只、加速流出1只/);
-    assert.match(caption, /<b>🔺 主力加速流入<\/b>\n<a href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.300308\.html">中际旭创<\/a> <b>\+8\.75亿<\/b>\n/);
+    assert.match(caption, /<b>🔺 主力加速流入<\/b>\n<a href="https:\/\/mlink\.eastmoney\.com\/h52n\/nlink\.html\?type=localurl&amp;id=eastmoney%3A%2F%2Fpage%2Fstockpage%3Fcode%3D300308%26market%3D0">中际旭创<\/a> <b>\+8\.75亿<\/b>\n/);
     assert.match(caption, /<b>🔻 主力加速流出<\/b>\n⭐<a [^>]+>五粮液<\/a> <b>≤-7951万<\/b>\n/);
     assert.doesNotMatch(caption, /<code>|-6\.04%/, "图片说明不带代码和涨跌幅");
     assert.match(caption, /非交易所官方口径/);

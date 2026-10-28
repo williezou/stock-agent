@@ -1,11 +1,20 @@
 const { escapeHtml } = require("./format");
 
-// 可跳转App的手机版行情页（两家都没有可直接唤起App的公开链接，手机网页上可一键打开App）
+// 东方财富：Telegram 只允许 http(s)/tg 链接，不能直接用 eastmoney:// 协议，改用东方财富的 iOS 通用链接
+// mlink.eastmoney.com/h52n/*（其 apple-app-site-association 指向东方财富App）：已装App时点击直接进入个股页，
+// 未装时打开中转页。id 参数为App内部地址，格式取自东方财富手机版行情页的“打开App”按钮（仅iOS写法）
+const EASTMONEY_APP_LINK = "https://mlink.eastmoney.com/h52n/nlink.html?type=localurl&id=";
+
+function eastmoneyMarket(symbol) {
+    return String(symbol).startsWith("6") ? 1 : 0;
+}
+
+// 同花顺只提供手机版行情页（网页上可一键打开App）
 const APPS = [
     {
         key: "eastmoney",
         label: "东方财富",
-        url: symbol => `https://wap.eastmoney.com/quote/stock/${String(symbol).startsWith("6") ? 1 : 0}.${symbol}.html`
+        url: symbol => `${EASTMONEY_APP_LINK}${encodeURIComponent(`eastmoney://page/stockpage?code=${symbol}&market=${eastmoneyMarket(symbol)}`)}`
     },
     {
         key: "tonghuashun",
@@ -19,7 +28,7 @@ function tagLink(label, url) {
 }
 
 /**
- * 推送与回复中股票名称/代码的统一渲染：名称本身链接东方财富手机版行情页（可跳转App），
+ * 推送与回复中股票名称/代码的统一渲染：名称本身链接东方财富（已装App时直接打开个股页），
  * 代码保持 <code> 等宽格式（Telegram中可点击复制，且不允许与链接嵌套）。
  *   new StockLink("002249", "大洋电机").html()  →  <a href="…eastmoney…">大洋电机</a> <code>002249</code>
  */
@@ -71,6 +80,6 @@ class StockLink {
 }
 
 // 消息末尾的说明
-const STOCK_LINK_LEGEND = "点股票名称打开东方财富行情（可跳转App）";
+const STOCK_LINK_LEGEND = "点股票名称打开东方财富App";
 
 module.exports = { STOCK_LINK_LEGEND, StockLink };
