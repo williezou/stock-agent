@@ -1,6 +1,7 @@
 /**
  * 龙虎榜数据服务
- * - 龙虎榜：同花顺日报页面为主源，东方财富明细接口为备用（减少对东方财富的请求，降低本机IP被封禁的风险）
+ * - 龙虎榜：同花顺日报页面为主源，东方财富明细接口为备用（减少对东方财富的请求，降低本机IP被封禁的风险）；
+ *   同花顺没有IPv6，纯IPv6网络下只用东方财富
  * - 连涨/连跌：从行情列表筛选涨停/跌停个股
  */
 
@@ -25,10 +26,12 @@ function sortByNetAmount(board) {
 }
 
 function createLonghuService({ httpClient, requestWithRetry, boardSources }) {
-    const [primary, fallback] = boardSources || [
-        createTonghuashunLonghuSource({ httpClient, requestWithRetry }),
-        createEastmoneyLonghuSource({ httpClient, requestWithRetry })
-    ];
+    const [primary, fallback] = boardSources || (config.ipv6Only
+        ? [createEastmoneyLonghuSource({ httpClient, requestWithRetry })]
+        : [
+            createTonghuashunLonghuSource({ httpClient, requestWithRetry }),
+            createEastmoneyLonghuSource({ httpClient, requestWithRetry })
+        ]);
 
     /**
      * 指定交易日的龙虎榜（沪深北交易所当日公开信息，通常在收盘后16:00-20:00陆续发布），按净买入额从高到低排序。
@@ -40,10 +43,11 @@ function createLonghuService({ httpClient, requestWithRetry, boardSources }) {
         try {
             board = await primary.getBoardByDate(dateStr);
         } catch (error) {
+            if (!fallback) throw error;
             console.log(`⚠️ ${primary.name}龙虎榜获取失败（${formatError(error)}），改用${fallback.name}`);
             return sortByNetAmount(await fallback.getBoardByDate(dateStr));
         }
-        if (!board.length) {
+        if (!board.length && fallback) {
             board = await fallback.getBoardByDate(dateStr).catch(error => {
                 console.log(`⚠️ ${fallback.name}龙虎榜确认失败（${formatError(error)}），按未发布处理`);
                 return [];
@@ -52,10 +56,19 @@ function createLonghuService({ httpClient, requestWithRetry, boardSources }) {
         return sortByNetAmount(board);
     }
 
-    // 某只股票当日的买卖席位明细（仅同花顺提供，按用户点击查询）；未上榜或未发布时返回null
+    // 某只股票当日的买卖席位明细（按用户点击查询），主源失败时改用备用源；未上榜或未发布时返回null
     async function getSeatDetails(dateStr, symbol) {
-        if (typeof primary.getSeatDetails !== "function") throw new Error(`${primary.name}不支持查询龙虎榜席位`);
-        return primary.getSeatDetails(dateStr, symbol);
+        const seatSources = [primary, fallback].filter(source => source && typeof source.getSeatDetails === "function");
+        if (!seatSources.length) throw new Error(`${primary.name}不支持查询龙虎榜席位`);
+        for (const [index, source] of seatSources.entries()) {
+            try {
+                return await source.getSeatDetails(dateStr, symbol);
+            } catch (error) {
+                const next = seatSources[index + 1];
+                if (!next) throw error;
+                console.log(`⚠️ ${source.name}龙虎榜席位获取失败（${formatError(error)}），改用${next.name}`);
+            }
+        }
     }
 
     /**

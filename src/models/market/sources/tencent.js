@@ -1,7 +1,10 @@
+const { config } = require("../../../config");
 const { BROWSER_USER_AGENT, notFound, withPrevCloseFields } = require("./common");
 
 // 备用源二：腾讯前复权日K（成交量单位为手；历史成交额/换手率缺失，仅最新一日取自实时行情）
 const KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get";
+// web.ifzq.gtimg.cn 没有IPv6；proxy.finance.qq.com 是同一接口的IPv6可达入口，返回内容一致
+const KLINE_URL_IPV6 = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get";
 
 function toTencentCode(symbol) {
     return `${String(symbol || "").startsWith("6") ? "sh" : "sz"}${symbol}`;
@@ -38,7 +41,7 @@ function parseTencentKlines(data, symbol) {
 function createTencentSource({ httpClient, requestWithRetry }) {
     async function fetchKlineData(symbol, limit) {
         const res = await requestWithRetry(() =>
-            httpClient.get(KLINE_URL, {
+            httpClient.get(config.ipv6Only ? KLINE_URL_IPV6 : KLINE_URL, {
                 params: { param: `${toTencentCode(symbol)},day,,,${limit},qfq` },
                 headers: { "User-Agent": BROWSER_USER_AGENT }
             })

@@ -1,3 +1,4 @@
+const { config } = require("../../config");
 const { isNotFound } = require("./sources/common");
 const { createEastmoneySource } = require("./sources/eastmoney");
 const { createTencentSource } = require("./sources/tencent");
@@ -6,12 +7,12 @@ const { createTonghuashunSource } = require("./sources/tonghuashun");
 const SOURCE_FAILURE_THRESHOLD = 2; // 某数据源连续失败达到次数后暂停访问，避免在封禁期间持续请求
 const SOURCE_COOLDOWN_MS = 30 * 60 * 1000;
 
-// 行情数据服务：按 东方财富 → 同花顺 → 腾讯 顺序自动切换，每个数据源独立熔断。
-// 进程内应复用同一实例，熔断冷却才能跨调度轮次生效
+// 行情数据服务：按 东方财富 → 同花顺 → 腾讯 顺序自动切换，每个数据源独立熔断；
+// 同花顺没有IPv6，纯IPv6网络下跳过。进程内应复用同一实例，熔断冷却才能跨调度轮次生效
 function createMarketService({ httpClient, requestWithRetry, now = () => Date.now(), sources }) {
     const sourceList = sources || [
         createEastmoneySource({ httpClient, requestWithRetry }),
-        createTonghuashunSource({ httpClient, requestWithRetry }),
+        ...(config.ipv6Only ? [] : [createTonghuashunSource({ httpClient, requestWithRetry })]),
         createTencentSource({ httpClient, requestWithRetry })
     ];
     const health = { primaryFailures: 0, fallbackUsed: 0, fallbackFailures: 0, lastPrimaryError: "", sources: {} };
@@ -73,6 +74,11 @@ function createMarketService({ httpClient, requestWithRetry, now = () => Date.no
     };
 }
 
+// 默认行情源的名称，顺序与 createMarketService 的默认源一致（告警文案用）
+function defaultSourceNames() {
+    return config.ipv6Only ? ["东方财富", "腾讯"] : ["东方财富", "同花顺", "腾讯"];
+}
+
 // 共享实例的健康计数是累计值，取某次调用期间的增量
 function healthDelta(before, after) {
     const sources = {};
@@ -89,4 +95,4 @@ function healthDelta(before, after) {
     };
 }
 
-module.exports = { createMarketService, healthDelta };
+module.exports = { createMarketService, defaultSourceNames, healthDelta };

@@ -1,5 +1,6 @@
 const { config } = require("../config");
 const telegram = require("../gateways/telegram");
+const { defaultSourceNames } = require("../models/market/market-data");
 const { getChinaClock, isWeekdayWindow, minutesOfDay } = require("../models/market/trading-calendar");
 const { alertAdmin, sentAlerts } = require("../services/admin-alert");
 const { buildReports } = require("../services/daily-report");
@@ -40,16 +41,17 @@ function uniqueTargets(recipients) {
 function dataSourceAlerts(health, dateStr) {
     if (!health) return [];
     const alerts = [];
+    const [primaryName, ...fallbackNames] = defaultSourceNames();
     if (health.primaryFailures > 0) {
         alerts.push({
             key: `${dateStr}:primary`,
-            text: `⚠️ 东方财富行情接口异常（${health.lastPrimaryError || "未知错误"}，失败${health.primaryFailures}次），今日已自动切换备用源（${Object.keys(health.sources || {}).join("、") || "同花顺/腾讯"}）。`
+            text: `⚠️ ${primaryName}行情接口异常（${health.lastPrimaryError || "未知错误"}，失败${health.primaryFailures}次），今日已自动切换备用源（${Object.keys(health.sources || {}).join("、") || fallbackNames.join("/")}）。`
         });
     }
     if (health.fallbackFailures > 0) {
         alerts.push({
             key: `${dateStr}:fallback`,
-            text: `❌ 东方财富、同花顺、腾讯行情源均获取失败（${health.fallbackFailures}只股票），相关用户的收盘报告将延迟或缺少这些股票。`
+            text: `❌ ${[primaryName, ...fallbackNames].join("、")}行情源均获取失败（${health.fallbackFailures}只股票），相关用户的收盘报告将延迟或缺少这些股票。`
         });
     }
     return alerts;

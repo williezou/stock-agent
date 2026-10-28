@@ -37,6 +37,7 @@ PUBLIC_BASE_URL=https://你的服务域名
 HTTP_PROXY=   # 可选
 HTTPS_PROXY=  # 可选
 NEWSNOW_BASE_URL= # 可选，默认 https://newsnow.busiyi.world
+IPV6_ONLY=false # 可选；纯IPv6主机设为true：东方财富实时行情改用带IPv6的编号节点、腾讯改用IPv6入口，跳过没有IPv6的同花顺（龙虎榜与席位只用东方财富）
 ```
 
 ## 目录结构

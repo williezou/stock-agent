@@ -37,6 +37,7 @@ DATABASE_URL=
 PUBLIC_BASE_URL=https://your-service.example
 HTTP_PROXY=   # optional
 HTTPS_PROXY=  # optional
+IPV6_ONLY=false # optional; true on IPv6-only hosts: Eastmoney quotes use IPv6-capable numbered push2 nodes, Tencent uses its IPv6 endpoint, Tonghuashun (no IPv6) is skipped
 ```
 
 > `FINNHUB_API_KEY` is no longer used but can be kept empty.

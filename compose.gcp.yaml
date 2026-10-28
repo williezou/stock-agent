@@ -1,0 +1,27 @@
+# Google Cloud 纯IPv6虚拟机部署覆盖：不申请公网IPv4以省钱，云端直连外网
+# - 去掉本机代理，apt 改用 Debian 官方源
+# - 镜像改从 Docker Hub 拉取（public.ecr.aws 没有IPv6）
+# - IPV6_ONLY：行情走有IPv6的接口入口，跳过同花顺
+# 用法：docker compose -f compose.yaml -f compose.gcp.yaml up -d --build
+x-cloud: &cloud
+  build:
+    context: .
+    args:
+      http_proxy: ""
+      https_proxy: ""
+      APT_MIRROR: deb.debian.org
+      NODE_IMAGE: node:20-bookworm-slim
+  environment:
+    HTTP_PROXY: ""
+    HTTPS_PROXY: ""
+    IPV6_ONLY: "true"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+
+  bot:
+    <<: *cloud
+
+  scheduler:
+    <<: *cloud

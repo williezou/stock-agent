@@ -1,12 +1,20 @@
+const { config } = require("../../../config");
 const { BROWSER_USER_AGENT, notFound } = require("./common");
 
 // 主数据源：东方财富前复权日K（fqt=1），字段完整；成交量单位为手
 const KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get";
-const QUOTE_URL = "https://push2.eastmoney.com/api/qt/stock/get";
+const PUSH2_NODE_COUNT = 100;
 const HEADERS = {
     "User-Agent": BROWSER_USER_AGENT,
     "Referer": "https://quote.eastmoney.com/"
 };
+
+// push2.eastmoney.com 没有IPv6；纯IPv6网络下改用接口相同、带IPv6的编号节点 1~100.push2，
+// 每次请求随机选一个节点以分散限流，重试时也会换到另一个节点
+function push2Url(path, random = Math.random) {
+    const host = config.ipv6Only ? `${1 + Math.floor(random() * PUSH2_NODE_COUNT)}.push2.eastmoney.com` : "push2.eastmoney.com";
+    return `https://${host}${path}`;
+}
 
 function toSecId(symbol) {
     return String(symbol || "").startsWith("6") ? `1.${symbol}` : `0.${symbol}`;
@@ -55,7 +63,7 @@ function createEastmoneySource({ httpClient, requestWithRetry }) {
 
     async function getStockProfile(symbol) {
         const res = await requestWithRetry(() =>
-            httpClient.get(QUOTE_URL, {
+            httpClient.get(push2Url("/api/qt/stock/get"), {
                 params: { secid: toSecId(symbol), fields: "f57,f58" },
                 headers: HEADERS
             })
@@ -68,4 +76,4 @@ function createEastmoneySource({ httpClient, requestWithRetry }) {
     return { name: "东方财富", getDailyKline, getStockProfile };
 }
 
-module.exports = { HEADERS, createEastmoneySource, parseKlines, toSecId };
+module.exports = { HEADERS, createEastmoneySource, parseKlines, push2Url, toSecId };

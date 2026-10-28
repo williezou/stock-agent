@@ -205,3 +205,73 @@ test("主备切换：同花顺为空且东方财富失败时按未发布处理�
         /ECONNRESET/
     );
 });
+
+function seatRow(tradeId, name, buy, sell) {
+    return { TRADE_ID: tradeId, OPERATEDEPT_NAME: name, BUY: buy, SELL: sell, NET: buy - sell };
+}
+
+test("东方财富席位：按上榜记录归组，买入按买入额、卖出按卖出额降序；未上榜返回null", async () => {
+    const byReport = {
+        RPT_DAILYBILLBOARD_DETAILS: [
+            { ...boardRow("600010", "2026-10-27", "日振幅达15%"), TRADE_ID: 1, BILLBOARD_BUY_AMT: 3e7, BILLBOARD_SELL_AMT: 2e7 },
+            { ...boardRow("600010", "2026-10-27", "日换手率达20%"), TRADE_ID: 2, BILLBOARD_BUY_AMT: 4e7, BILLBOARD_SELL_AMT: 1e7 }
+        ],
+        RPT_BILLBOARD_DAILYDETAILSBUY: [seatRow(1, "甲营业部", 1e6, 0), seatRow(1, "乙营业部", 5e6, 1e5), seatRow(2, "丙营业部", 2e6, 0)],
+        RPT_BILLBOARD_DAILYDETAILSSELL: [seatRow(1, "丁营业部", 0, 3e6), seatRow(1, "戊营业部", 0, 8e6)]
+    };
+    const calls = [];
+    const source = createEastmoneyLonghuSource({
+        httpClient: { async get(url, options) { calls.push(options.params); return { data: { success: true, result: { data: byReport[options.params.reportName] } } }; } },
+        requestWithRetry: fn => fn()
+    });
+    const detail = await source.getSeatDetails("2026-10-27", "600010");
+    assert.equal(detail.name, "股票600010");
+    assert.equal(detail.changePct, 9.98);
+    assert.deepEqual(detail.groups.map(group => group.reason), ["日振幅达15%", "日换手率达20%"]);
+    const [first, second] = detail.groups;
+    assert.equal(first.buyTotal, 3e7);
+    assert.equal(first.netAmount, 1e7);
+    assert.deepEqual(first.buyers.map(seat => seat.name), ["乙营业部", "甲营业部"]);
+    assert.deepEqual(first.sellers.map(seat => [seat.name, seat.sell, seat.net]), [["戊营业部", 8e6, -8e6], ["丁营业部", 3e6, -3e6]]);
+    assert.deepEqual(second.buyers.map(seat => seat.name), ["丙营业部"]);
+    assert.deepEqual(second.sellers, []);
+    assert.ok(calls.every(params => params.filter === `(TRADE_DATE='2026-10-27')(SECURITY_CODE="600010")`));
+
+    assert.deepEqual(calls.map(params => params.reportName), ["RPT_DAILYBILLBOARD_DETAILS", "RPT_BILLBOARD_DAILYDETAILSBUY", "RPT_BILLBOARD_DAILYDETAILSSELL"]);
+
+    byReport.RPT_DAILYBILLBOARD_DETAILS = [];
+    calls.length = 0;
+    assert.equal(await source.getSeatDetails("2026-10-27", "600010"), null);
+    assert.equal(calls.length, 1, "未上榜时不再请求席位报表");
+});
+
+test("席位查询：同花顺失败时改用东方财富", async () => {
+    const ths = { ...fakeSource("同花顺", []), async getSeatDetails() { throw new Error("403"); } };
+    const em = { ...fakeSource("东方财富", []), async getSeatDetails(date, symbol) { return { symbol, name: "东财", changePct: 1, groups: [] }; } };
+    const detail = await createLonghuService({ boardSources: [ths, em] }).getSeatDetails("2026-10-27", "600010");
+    assert.equal(detail.name, "东财");
+});
+
+test("纯IPv6：龙虎榜只用东方财富，不请求同花顺", async () => {
+    const original = process.env.IPV6_ONLY;
+    process.env.IPV6_ONLY = "true";
+    try {
+        const urls = [];
+        const service = createLonghuService({
+            httpClient: {
+                async get(url, options) {
+                    urls.push(url);
+                    const rows = options.params.reportName === "RPT_DAILYBILLBOARD_DETAILS" ? [boardRow("600010", "2026-10-27", "日涨幅偏离值达7%")] : [];
+                    return { data: { success: true, result: { data: rows, pages: 1 } } };
+                }
+            },
+            requestWithRetry: fn => fn()
+        });
+        assert.deepEqual((await service.getBoardByDate("2026-10-27")).map(item => item.symbol), ["600010"]);
+        assert.equal((await service.getSeatDetails("2026-10-27", "600010")).groups.length, 1);
+        assert.ok(urls.length && urls.every(url => url.includes("eastmoney")), "只请求东方财富");
+    } finally {
+        if (original === undefined) delete process.env.IPV6_ONLY;
+        else process.env.IPV6_ONLY = original;
+    }
+});

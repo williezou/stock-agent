@@ -1,4 +1,6 @@
-FROM public.ecr.aws/docker/library/node:20-bookworm-slim
+# 基础镜像默认取自 AWS ECR 公共镜像（国内可直接拉取）；它没有IPv6，纯IPv6主机改用 Docker Hub（见 compose.gcp.yaml）
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-bookworm-slim
+FROM ${NODE_IMAGE}
 
 ENV NODE_ENV=production
 WORKDIR /app

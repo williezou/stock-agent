@@ -1,7 +1,7 @@
 const { delay } = require("../../lib/async");
 const { formatError } = require("../../lib/http");
 const { BROWSER_USER_AGENT } = require("./sources/common");
-const { HEADERS: EASTMONEY_HEADERS } = require("./sources/eastmoney");
+const { HEADERS: EASTMONEY_HEADERS, push2Url } = require("./sources/eastmoney");
 
 // 沪深A股全市场行情快照（选股池与涨跌停统计用）。主源东方财富，失败时切换新浪财经；
 // 本次运行中主源失败一次后，后续分页直接使用新浪，避免在封禁期间反复超时
@@ -12,12 +12,11 @@ const PAGE_GAP_MS = 120;
 const MIN_LIMIT_MOVE_PCT = 4.9; // 最小涨跌停幅度（ST ±5%），低于此值不可能再有涨跌停
 
 function createEastmoneyListSource({ httpClient, requestWithRetry }) {
-    const url = "https://push2.eastmoney.com/api/qt/clist/get";
     const sortField = { turnover: "f6", changePct: "f3" };
     return {
         name: "东方财富",
         async fetchPage({ page, sortBy, descending }) {
-            const res = await requestWithRetry(() => httpClient.get(url, {
+            const res = await requestWithRetry(() => httpClient.get(push2Url("/api/qt/clist/get"), {
                 params: {
                     pn: page,
                     pz: PAGE_SIZE,

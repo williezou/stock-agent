@@ -163,7 +163,7 @@ function generateSeatChart({ date, detail }) {
 
     ctx.fillStyle = COLORS.muted;
     ctx.font = font(17);
-    ctx.fillText("数据来源：沪深北交易所当日公开信息（同花顺整理），仅供参考，不构成投资建议。", PADDING, height - 22);
+    ctx.fillText("数据来源：沪深北交易所当日公开信息（同花顺/东方财富整理），仅供参考，不构成投资建议。", PADDING, height - 22);
     return canvas.toBuffer("image/png");
 }
 

@@ -154,3 +154,45 @@ test("查无此股不计入熔断，冷却结束后重新计数", async () => {
     await assert.rejects(service.getDailyKline("600519", 2));
     assert.deepEqual(calls.filter(c => c === "em"), ["em", "em"], "冷却结束后需再次连续失败才重新暂停");
 });
+
+// 在 IPV6_ONLY 开关下执行，结束后恢复原值
+async function withIpv6Only(fn) {
+    const original = process.env.IPV6_ONLY;
+    process.env.IPV6_ONLY = "true";
+    try {
+        return await fn();
+    } finally {
+        if (original === undefined) delete process.env.IPV6_ONLY;
+        else process.env.IPV6_ONLY = original;
+    }
+}
+
+test("东方财富push2：默认用主域名，纯IPv6时改用带IPv6的编号节点1~100", async () => {
+    const { push2Url } = require("../../src/models/market/sources/eastmoney");
+    assert.equal(push2Url("/api/qt/stock/get"), "https://push2.eastmoney.com/api/qt/stock/get");
+    await withIpv6Only(() => {
+        assert.equal(push2Url("/api/qt/clist/get", () => 0), "https://1.push2.eastmoney.com/api/qt/clist/get");
+        assert.equal(push2Url("/api/qt/clist/get", () => 0.999), "https://100.push2.eastmoney.com/api/qt/clist/get");
+    });
+});
+
+test("纯IPv6：行情跳过同花顺，东方财富失败直接切换腾讯IPv6入口", async () => {
+    await withIpv6Only(async () => {
+        const urls = [];
+        const service = createMarketService({
+            httpClient: {
+                async get(url) {
+                    urls.push(url);
+                    if (url.includes("eastmoney")) throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
+                    return { data: tencentPayload };
+                }
+            },
+            requestWithRetry: fn => fn()
+        });
+        assert.equal((await service.getDailyKline("600519", 2)).at(-1).close, 1355.9);
+        assert.deepEqual(await service.getStockProfile("600519"), { symbol: "600519", name: "贵州茅台" });
+        assert.ok(!urls.some(url => url.includes("10jqka")), "不应请求同花顺");
+        assert.ok(urls.filter(url => url.includes("qq.com")).every(url => url.startsWith("https://proxy.finance.qq.com/")));
+        assert.match(urls.find(url => url.includes("/api/qt/stock/get")), /^https:\/\/\d+\.push2\.eastmoney\.com\//);
+    });
+});

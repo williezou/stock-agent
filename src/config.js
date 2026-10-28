@@ -23,6 +23,8 @@ const config = {
     get databaseUrl() { return env.DATABASE_URL || ""; },
     get proxyUrl() { return env.HTTPS_PROXY || env.HTTP_PROXY || env.https_proxy || env.http_proxy || ""; },
     get newsNowBaseUrl() { return env.NEWSNOW_BASE_URL || "https://newsnow.busiyi.world"; },
+    // 纯IPv6网络（如无公网IPv4的云主机）：行情改走有IPv6的接口入口，跳过没有IPv6的同花顺
+    get ipv6Only() { return env.IPV6_ONLY === "true"; },
     server: {
         get port() { return Number(env.PORT || 10000); },
         host: "0.0.0.0"

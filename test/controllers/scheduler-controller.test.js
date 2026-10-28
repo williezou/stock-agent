@@ -163,3 +163,22 @@ test("告警发送失败会在下一轮重试，生成失败在最后机会提�
     assert.match(alerts[1], /最终生成失败/);
     assert.equal(alerts.length, 2);
 });
+
+test("行情源告警列出实际使用的数据源：纯IPv6时不含同花顺", () => {
+    const { dataSourceAlerts } = require("../../src/controllers/scheduler-controller");
+    const health = { primaryFailures: 1, lastPrimaryError: "ECONNRESET", fallbackFailures: 2, sources: {} };
+    const [primary, fallback] = dataSourceAlerts(health, "2026-10-28");
+    assert.match(primary.text, /切换备用源（同花顺\/腾讯）/);
+    assert.match(fallback.text, /东方财富、同花顺、腾讯行情源均获取失败/);
+
+    const original = process.env.IPV6_ONLY;
+    process.env.IPV6_ONLY = "true";
+    try {
+        const [ipv6Primary, ipv6Fallback] = dataSourceAlerts(health, "2026-10-28");
+        assert.match(ipv6Primary.text, /切换备用源（腾讯）/);
+        assert.match(ipv6Fallback.text, /东方财富、腾讯行情源均获取失败/);
+    } finally {
+        if (original === undefined) delete process.env.IPV6_ONLY;
+        else process.env.IPV6_ONLY = original;
+    }
+});
