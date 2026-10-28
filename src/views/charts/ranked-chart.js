@@ -20,6 +20,7 @@ const COLORS = {
     text: "#e2e8f0",
     muted: "#8b97ab",
     up: "#f55252",
+    gold: "#facc15",
     down: "#22c55e"
 };
 
@@ -39,7 +40,7 @@ function fitText(ctx, text, maxWidth) {
     return `${value}…`;
 }
 
-function drawSection(ctx, { title, rows, color, top, scale, detail, value, magnitude }) {
+function drawSection(ctx, { title, rows, color, top, scale, detail, value, magnitude, badge, nameMaxWidth }) {
     ctx.fillStyle = color;
     ctx.fillRect(PADDING, top + 14, 8, 28);
     ctx.fillStyle = COLORS.text;
@@ -58,16 +59,23 @@ function drawSection(ctx, { title, rows, color, top, scale, detail, value, magni
 
         ctx.fillStyle = COLORS.text;
         ctx.font = font(27, "bold");
-        const name = fitText(ctx, row.name, 190);
+        // 名称与标签都不能压到条形图：先量出标签宽度，名称在剩余空间内截断
+        const tag = badge(row);
+        ctx.font = font(23, "bold");
+        const tagWidth = tag ? ctx.measureText(tag.text).width + 14 : 0;
+        ctx.font = font(27, "bold");
+        const name = fitText(ctx, row.name, Math.min(nameMaxWidth, BAR_LEFT - NAME_LEFT - 20 - tagWidth));
         ctx.fillText(name, NAME_LEFT, y + 32);
         const nameWidth = ctx.measureText(name).width;
-        ctx.fillStyle = signColor(row.changePct);
-        ctx.font = font(23, "bold");
-        ctx.fillText(pctText(row.changePct), NAME_LEFT + nameWidth + 14, y + 31);
+        if (tag) {
+            ctx.fillStyle = tag.color || COLORS.text;
+            ctx.font = font(23, "bold");
+            ctx.fillText(tag.text, NAME_LEFT + nameWidth + 14, y + 31);
+        }
 
         ctx.fillStyle = COLORS.muted;
         ctx.font = font(18);
-        ctx.fillText(fitText(ctx, `${row.symbol}  ${detail(row)}`, BAR_LEFT - NAME_LEFT - 20), NAME_LEFT, y + 58);
+        ctx.fillText(fitText(ctx, detail(row), BAR_LEFT - NAME_LEFT - 20), NAME_LEFT, y + 58);
 
         const barWidth = Math.max(4, magnitude(row) / scale * BAR_MAX_WIDTH);
         ctx.fillStyle = color;
@@ -82,12 +90,28 @@ function drawSection(ctx, { title, rows, color, top, scale, detail, value, magni
     return top + SECTION_TITLE_HEIGHT + rows.length * ROW_HEIGHT;
 }
 
+// 当日涨跌幅标签（股票排行默认）
+function changeBadge(row) {
+    return { text: pctText(row.changePct), color: signColor(row.changePct) };
+}
+
 // 通用排行条形图：上段红色、下段绿色，条长按 magnitude 统一比例；
-// sections：[{ title, rows, up }]，detail(row)：代码后的说明，value(row)：右侧数字，subtitle/footer：标题下与底部的说明
-function generateRankedChart({ title, subtitle, footer, sections: input, detail, value, magnitude }) {
+// sections：[{ title, rows, up, color }]（color 可覆盖红/绿），detail(row)：第二行说明（股票排行默认以代码开头），value(row)：右侧数字，
+// badge(row)：名称后的彩色标签（默认当日涨跌幅，返回null不显示），subtitle/footer：标题下与底部的说明
+function generateRankedChart({
+    title,
+    subtitle,
+    footer,
+    sections: input,
+    detail,
+    value,
+    magnitude,
+    badge = changeBadge,
+    nameMaxWidth = 190
+}) {
     const sections = input
         .filter(section => section.rows.length)
-        .map(section => ({ title: section.title, rows: section.rows, color: section.up ? COLORS.up : COLORS.down }));
+        .map(section => ({ title: section.title, rows: section.rows, color: section.color || (section.up ? COLORS.up : COLORS.down) }));
     const height = HEADER_HEIGHT
         + sections.reduce((sum, section) => sum + SECTION_TITLE_HEIGHT + section.rows.length * ROW_HEIGHT + SECTION_GAP, 0)
         + FOOTER_HEIGHT;
@@ -109,7 +133,7 @@ function generateRankedChart({ title, subtitle, footer, sections: input, detail,
 
     let top = HEADER_HEIGHT;
     for (const section of sections) {
-        top = drawSection(ctx, { ...section, top, scale, detail, value, magnitude }) + SECTION_GAP;
+        top = drawSection(ctx, { ...section, top, scale, detail, value, magnitude, badge, nameMaxWidth }) + SECTION_GAP;
     }
 
     ctx.fillStyle = COLORS.muted;
@@ -118,4 +142,4 @@ function generateRankedChart({ title, subtitle, footer, sections: input, detail,
     return canvas.toBuffer("image/png");
 }
 
-module.exports = { generateRankedChart, pctText };
+module.exports = { COLORS, generateRankedChart, pctText };

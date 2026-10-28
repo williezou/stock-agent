@@ -11,7 +11,7 @@ function generateVolumeSpikeChart(content) {
             { title: "急涨放量", rows: content.up, up: true },
             { title: "急跌放量", rows: content.down, up: false }
         ],
-        detail: row => `近${content.minutes}分钟成交${amountText(row.windowAmount)}`,
+        detail: row => `${row.symbol}  近${content.minutes}分钟成交${amountText(row.windowAmount)}`,
         value: row => pctText(row.windowChange),
         magnitude: row => Math.abs(row.windowChange)
     });

@@ -1,7 +1,8 @@
-// 每日调度器：常驻进程，按固定间隔执行资金异动、量价异动、收盘报告与龙虎榜任务的调度轮次（A股扫描在GitHub Actions执行）
+// 每日调度器：常驻进程，按固定间隔执行资金异动、量价异动、收盘报告、龙虎榜与游资动向任务的调度轮次（A股扫描在GitHub Actions执行）
 const { openStore } = require("../src/app");
 const { config, requireConfig } = require("../src/config");
 const { createMonitors, runFundFlowTick } = require("../src/controllers/fund-flow-controller");
+const { runHotMoneyTick } = require("../src/controllers/hot-money-controller");
 const { runLonghuTick } = require("../src/controllers/longhu-controller");
 const { runSchedulerTick } = require("../src/controllers/scheduler-controller");
 const { createVolumeSpikeMonitors, runVolumeSpikeTick } = require("../src/controllers/volume-spike-controller");
@@ -14,7 +15,8 @@ const JOBS = [
     { label: "资金异动", tick: runFundFlowTick },
     { label: "量价异动", tick: runVolumeSpikeTick },
     { label: "收盘报告", tick: runSchedulerTick },
-    { label: "龙虎榜", tick: runLonghuTick }
+    { label: "龙虎榜", tick: runLonghuTick },
+    { label: "游资动向", tick: runHotMoneyTick }
 ];
 
 async function startScheduler() {
@@ -27,7 +29,7 @@ async function startScheduler() {
     createMonitors();
     createVolumeSpikeMonitors();
     const store = await openStore();
-    console.log(`⏰ 调度器已启动（工作日北京时间）：资金异动 ${config.fundFlow.windows}，量价异动 ${config.volumeSpike.windows}，15:30-18:00 收盘报告，17:30-20:30 龙虎榜发布后推送`);
+    console.log(`⏰ 调度器已启动（工作日北京时间）：资金异动 ${config.fundFlow.windows}，量价异动 ${config.volumeSpike.windows}，15:30-18:00 收盘报告，17:30-20:30 龙虎榜发布后推送（随后推送游资动向）`);
 
     // 启动时 openStore 已清理过一次过期数据（保留7天），之后每天换日时再清理
     let prunedDate = chinaDateString();

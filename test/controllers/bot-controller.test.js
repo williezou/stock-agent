@@ -242,7 +242,7 @@ test("/longhu 切换龙虎榜推送，并支持 on/off 显式设置", async () =
     const { controller, sent, store } = setup();
     await controller.handleUpdate(privateMessage("/longhu"));
     assert.equal((await store.getSubscriber(100)).longhu_enabled, false, "默认开启，首次切换为关闭");
-    assert.match(sent.at(-1).text, /已关闭龙虎榜推送/);
+    assert.match(sent.at(-1).text, /已关闭龙虎榜与游资动向推送/);
     await controller.handleUpdate(privateMessage("/longhu on"));
     assert.equal((await store.getSubscriber(100)).longhu_enabled, true);
     assert.match(sent.at(-1).text, /已开启龙虎榜推送/);

@@ -70,8 +70,9 @@ function groupSeatDetails(symbol, boardRows, buyRows, sellRows) {
     };
 }
 
-function createEastmoneyLonghuSource({ httpClient, requestWithRetry }) {
-    async function query(params) {
+// 东方财富数据中心报表查询（龙虎榜、席位、营业部统计共用）
+function createDatacenterQuery({ httpClient, requestWithRetry }) {
+    return async function query(params) {
         const res = await requestWithRetry(() =>
             httpClient.get(URL, {
                 params: { columns: "ALL", source: "WEB", client: "WEB", ...params },
@@ -80,10 +81,14 @@ function createEastmoneyLonghuSource({ httpClient, requestWithRetry }) {
         );
         // 东财失败时仍返回 HTTP 200 但 success=false，需显式校验，否则会静默变空
         if (res.data && res.data.success === false && res.data.code !== NO_DATA_CODE) {
-            throw new Error(`东方财富龙虎榜接口业务失败: ${res.data.message || "未知原因"}`);
+            throw new Error(`东方财富数据中心接口业务失败: ${res.data.message || "未知原因"}`);
         }
         return { rows: res.data?.result?.data || [], pages: Number(res.data?.result?.pages) || 1 };
-    }
+    };
+}
+
+function createEastmoneyLonghuSource({ httpClient, requestWithRetry }) {
+    const query = createDatacenterQuery({ httpClient, requestWithRetry });
 
     function fetchPage(dateStr, pageNumber) {
         return query({
@@ -124,4 +129,4 @@ function createEastmoneyLonghuSource({ httpClient, requestWithRetry }) {
     return { name: "东方财富", getBoardByDate, getSeatDetails };
 }
 
-module.exports = { createEastmoneyLonghuSource, groupSeatDetails };
+module.exports = { createDatacenterQuery, createEastmoneyLonghuSource, groupSeatDetails };

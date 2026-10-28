@@ -11,7 +11,7 @@ function generateFundFlowChart(content) {
             { title: "主力加速流入", rows: content.inflow, up: true },
             { title: "主力加速流出", rows: content.outflow, up: false }
         ],
-        detail: row => `全天${signedAmount(row.mainNet)}${Number.isFinite(row.mainRatio) ? `（${pctText(row.mainRatio)}）` : ""}`,
+        detail: row => `${row.symbol}  全天${signedAmount(row.mainNet)}${Number.isFinite(row.mainRatio) ? `（${pctText(row.mainRatio)}）` : ""}`,
         value: deltaText,
         magnitude: row => Math.abs(row.delta)
     });

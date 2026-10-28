@@ -10,7 +10,7 @@ const BOT_COMMANDS = [
     { command: "add", description: "添加每日追踪股票" },
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
-    { command: "longhu", description: "开启/关闭龙虎榜推送" },
+    { command: "longhu", description: "开启/关闭龙虎榜与游资动向推送" },
     { command: "flow", description: "开启/关闭盘中异动提醒（资金、量价）" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
@@ -30,7 +30,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜推送\n/flow 开启/关闭盘中异动提醒（资金异动、量价异动）";
+const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭盘中异动提醒（资金异动、量价异动）";
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -172,8 +172,8 @@ function removedText(symbol, removed) {
 
 function longhuToggledText(enabled) {
     return enabled
-        ? "✅ 已开启龙虎榜推送：交易日收盘后（约18:00-20:30）榜单发布完成即推送。发送 /longhu off 可关闭。"
-        : "已关闭龙虎榜推送，自选股收盘报告不受影响。发送 /longhu on 可重新开启。";
+        ? "✅ 已开启龙虎榜推送：交易日收盘后（约18:00-20:30）榜单发布完成即推送，随后推送当日游资动向。发送 /longhu off 可关闭。"
+        : "已关闭龙虎榜与游资动向推送，自选股收盘报告不受影响。发送 /longhu on 可重新开启。";
 }
 
 function fundFlowToggledText(enabled) {

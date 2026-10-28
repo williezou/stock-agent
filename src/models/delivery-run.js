@@ -82,7 +82,16 @@ function createDeliveryRunRepository(pool) {
         );
     }
 
-    return { claimDeliveryRun, completeDeliveryRun, failDeliveryRun, listDueSubscribers, migrateLegacyScheduledRuns };
+    // 某任务当天是否已成功投递给至少一位用户（如游资动向等龙虎榜发布完成、推送成功后再推）
+    async function hasCompletedRun(jobName, runDate) {
+        const result = await pool.query(
+            "SELECT 1 FROM daily_delivery_runs WHERE job_name = $1 AND run_date = $2 AND status = 'done' LIMIT 1",
+            [jobName, runDate]
+        );
+        return result.rowCount > 0;
+    }
+
+    return { claimDeliveryRun, completeDeliveryRun, failDeliveryRun, hasCompletedRun, listDueSubscribers, migrateLegacyScheduledRuns };
 }
 
 module.exports = { createDeliveryRunRepository };
