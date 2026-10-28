@@ -152,7 +152,7 @@ async function runLonghuTick(store, now = new Date(), services = {}) {
     const alertContext = {
         notify,
         adminChatId: services.adminChatId ?? config.telegram.adminChatId,
-        alerted: services.alerted,
+        alerted: services.alerted || store.adminAlerts,
         dateStr
     };
 

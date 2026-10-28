@@ -66,7 +66,7 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
     const alertContext = {
         notify,
         adminChatId: services.adminChatId ?? config.telegram.adminChatId,
-        alerted: services.alerted || sentAlerts,
+        alerted: services.alerted || store.adminAlerts || sentAlerts,
         dateStr
     };
     const subscribers = await store.listDueSubscribers(JOB_NAME, dateStr, config.scheduler.maxAttempts);
@@ -91,7 +91,8 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             now,
             dryRun: false,
             allowPartial: true,
-            klineCache: typeof store.getCachedKlines === "function" ? store : undefined
+            klineCache: typeof store.getCachedKlines === "function" ? store : undefined,
+            reportCache: typeof store.getCachedReports === "function" ? store : undefined
         });
     } catch (error) {
         await Promise.allSettled(recipients.map(recipient =>

@@ -87,13 +87,37 @@ class FundFlowMonitor {
         return isWeekdayWindow(now, this.start, this.end + 1);
     }
 
+    // 当天的起点快照与已推送股票存库，进程重启（如盘中部署）后接着用，不丢起点、不重复推送
+    async restore(deps, dateStr) {
+        if (!deps.loadState) return;
+        const saved = await deps.loadState(dateStr, this.label).catch(error => {
+            console.error(`⚠️ 读取${this.label}资金异动状态失败：${formatError(error)}`);
+            return null;
+        });
+        if (!saved) return;
+        if (saved.baseline) this.state.baseline = { ...saved.baseline, flows: new Map(Object.entries(saved.baseline.flows || {})) };
+        this.state.alerted = new Set(saved.alerted || []);
+    }
+
+    async persist(deps) {
+        if (!deps.saveState) return;
+        const { baseline, alerted, date } = this.state;
+        const state = { baseline: baseline && { ...baseline, flows: Object.fromEntries(baseline.flows) }, alerted: [...alerted] };
+        await deps.saveState(date, this.label, state)
+            .catch(error => console.error(`⚠️ 保存${this.label}资金异动状态失败：${formatError(error)}`));
+    }
+
     // deps：fundFlow（getRanking）、isTradingDay、listSubscribers、listWatchSymbols、
     // prepare（由推送内容生成 send(chatId, watchSymbols)，图片只生成一次供所有订阅者共用）、
-    // isBotBlocked、deactivateSubscriber、alertContext（管理员告警）
+    // isBotBlocked、deactivateSubscriber、alertContext（管理员告警）；
+    // 可选的 loadState/saveState（监控状态存库）与 recordAlert（推送记录存库）
     async tick(now, deps) {
         if (!this.isActive(now)) return { action: "outside-window" };
         const { dateStr } = getChinaClock(now);
-        if (this.state.date !== dateStr) this.state = FundFlowMonitor.newState(dateStr);
+        if (this.state.date !== dateStr) {
+            this.state = FundFlowMonitor.newState(dateStr);
+            await this.restore(deps, dateStr);
+        }
         const minute = minutesOfDay(now);
         const slot = Math.floor((minute - this.start) / this.pollMinutes);
         if (slot === this.state.lastSlot) return { action: "waiting" };
@@ -126,6 +150,7 @@ class FundFlowMonitor {
         if (!this.state.baseline || this.state.baseline.source !== ranking.source) {
             const switched = this.state.baseline ? { switchedFrom: this.state.baseline.source } : {};
             this.state.baseline = takeBaseline(ranking, minute);
+            await this.persist(deps);
             return { action: "waiting", baseline: formatMinutes(minute), source: ranking.source, ...switched };
         }
 
@@ -136,6 +161,7 @@ class FundFlowMonitor {
         if (!inflow.length && !outflow.length) return { action: "waiting" };
         inflow.forEach(row => this.state.alerted.add(`in:${row.symbol}`));
         outflow.forEach(row => this.state.alerted.add(`out:${row.symbol}`));
+        await this.persist(deps);
 
         const content = {
             label: this.label,
@@ -161,6 +187,10 @@ class FundFlowMonitor {
                     totals.failed++;
                 }
             }
+        }
+        if (deps.recordAlert) {
+            await deps.recordAlert(dateStr, this.label, { ...content, totals })
+                .catch(error => console.error(`⚠️ 保存${this.label}资金异动推送记录失败：${formatError(error)}`));
         }
         return { action: "processed", window: this.label, inflow: inflow.length, outflow: outflow.length, ...totals };
     }

@@ -67,6 +67,37 @@ const SCHEMA = [
         klines JSONB NOT NULL,
         fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (symbol, trade_date)
+    )`,
+    // 以下历史数据均保留7天（见 history.js）：
+    // 当日收盘报告（每只股票一份，多个用户共用，避免重复拉取行情与新闻）
+    `CREATE TABLE IF NOT EXISTS stock_reports (
+        report_date DATE NOT NULL,
+        symbol VARCHAR(6) NOT NULL,
+        report JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (report_date, symbol)
+    )`,
+    // 资金异动推送记录
+    `CREATE TABLE IF NOT EXISTS fund_flow_alerts (
+        id BIGSERIAL PRIMARY KEY,
+        alert_date DATE NOT NULL,
+        window_label TEXT NOT NULL,
+        content JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    "CREATE INDEX IF NOT EXISTS fund_flow_alerts_date_idx ON fund_flow_alerts (alert_date)",
+    // 资金异动监控状态（起点快照与已推送股票），重启后可恢复
+    `CREATE TABLE IF NOT EXISTS fund_flow_state (
+        state_date DATE NOT NULL,
+        window_label TEXT NOT NULL,
+        state JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (state_date, window_label)
+    )`,
+    // 已发送的管理员告警（按“日期:类型”去重，重启后不重复提醒）
+    `CREATE TABLE IF NOT EXISTS admin_alerts (
+        alert_key TEXT PRIMARY KEY,
+        sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`
 ];
 

@@ -184,6 +184,31 @@ test("监控流程：数据来源切换时以新来源重新建立起点，不�
     assert.match(calls.messages[0].text, /主力净流入为新浪按大单估算/);
 });
 
+test("监控状态存库：重启后恢复起点与已推送股票，不重新建起点、不重复推送；推送记录存库", async () => {
+    const saved = new Map();
+    const records = [];
+    const persistence = {
+        async loadState(date, label) { return saved.has(`${date}:${label}`) ? JSON.parse(saved.get(`${date}:${label}`)) : null; },
+        async saveState(date, label, state) { saved.set(`${date}:${label}`, JSON.stringify(state)); },
+        async recordAlert(date, label, content) { records.push({ date, label, content }); }
+    };
+    const surged = ranking([row("A", 3e8)], []);
+    const first = setup({ snapshots: [ranking([row("A", 1e8)], [])] });
+    await first.monitor.tick(at("14:30"), { ...first.deps, ...persistence });
+
+    // 部署重启：新的实例，从库里恢复14:30的起点
+    const second = setup({ snapshots: [surged] });
+    const result = await second.monitor.tick(at("14:35"), { ...second.deps, ...persistence });
+    assert.equal(result.action, "processed", "恢复起点后直接比较，不重新建起点");
+    assert.equal(second.calls.messages[0].content.since, "14:30");
+    assert.deepEqual(records.map(r => [r.date, r.label, r.content.inflow.map(x => x.symbol), r.content.totals.delivered]), [["2026-10-28", "尾盘", ["A"], 2]]);
+
+    // 再次重启：已推送过的A不会重复推送
+    const third = setup({ snapshots: [surged] });
+    assert.deepEqual(await third.monitor.tick(at("14:36"), { ...third.deps, ...persistence }), { action: "waiting" });
+    assert.equal(third.calls.messages.length, 0);
+});
+
 test("监控流程：跨天后重新建立起点", async () => {
     const { deps, monitor } = setup({ snapshots: [ranking([row("A", 0)], [])] });
     await monitor.tick(at("14:30"), deps);

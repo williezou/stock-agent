@@ -182,3 +182,19 @@ test("行情源告警列出实际使用的数据源：纯IPv6时不含同花顺"
         else process.env.IPV6_ONLY = original;
     }
 });
+
+test("管理员告警去重记录可存库（异步 has/add）：重启后同一天不再提醒；记录读取失败时仍会提醒", async () => {
+    const { alertAdmin } = require("../../src/services/admin-alert");
+    const rows = new Set();
+    const persisted = { async has(key) { return rows.has(key); }, async add(key) { rows.add(key); } };
+    const sent = [];
+    const context = { notify: async (_chatId, text) => sent.push(text), adminChatId: "admin", alerted: persisted, dateStr: "2026-10-28" };
+    await alertAdmin(context, { key: "2026-10-28:primary", text: "东财异常" });
+    await alertAdmin({ ...context }, { key: "2026-10-28:primary", text: "东财异常" }); // 模拟重启后再次触发
+    assert.deepEqual(sent, ["东财异常"]);
+    assert.ok(rows.has("2026-10-28:primary"));
+
+    const broken = { async has() { throw new Error("db down"); }, async add() { throw new Error("db down"); } };
+    await alertAdmin({ ...context, alerted: broken }, { key: "2026-10-28:fallback", text: "备用源也失败" });
+    assert.deepEqual(sent, ["东财异常", "备用源也失败"]);
+});

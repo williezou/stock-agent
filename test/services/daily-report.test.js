@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { prioritize, selectReportDate } = require("../../src/services/daily-report");
+const { buildReports, prioritize, selectReportDate } = require("../../src/services/daily-report");
 const { analyzeKlines, buildTradePlan } = require("../../src/services/technical-analysis");
 const { generateOverviewChart, generateStockChart } = require("../../src/views/charts/stock-charts");
 const { formatDailyCloseDelivery } = require("../../src/views/daily-report-view");
@@ -99,4 +99,41 @@ test("图形化交付按每两只股票分页并生成有效PNG", () => {
         assert.match(item.caption, /K\/D\/J/);
         assert.match(item.caption, /&lt;待核实&gt;|三季报公告/);
     }
+});
+
+test("当日已存库的报告直接复用：所有股票都有存档时不拉取日K与新闻，按用户的顺序返回", async () => {
+    const saved = new Map([
+        ["600887", { meta: { symbol: "600887", name: "伊利股份" }, cached: true }],
+        ["002380", { meta: { symbol: "002380", name: "科远智慧" }, cached: true }]
+    ]);
+    const lookups = [];
+    const reportCache = {
+        async getCachedReports(date, symbols) { lookups.push({ date, symbols }); return saved; },
+        async saveCachedReport() { throw new Error("不应重新保存"); }
+    };
+    const klineCache = { async getCachedKlines() { throw new Error("不应拉取日K"); } };
+    const result = await buildReports({
+        targets: [{ symbol: "002380", name: "科远智慧" }, { symbol: "600887", name: "伊利股份" }],
+        now: new Date("2026-10-28T08:00:00.000Z"), // 北京时间周三16:00
+        allowPartial: true,
+        klineCache,
+        reportCache
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.date, "2026-10-28");
+    assert.deepEqual(result.reports.map(report => report.meta.symbol), ["002380", "600887"]);
+    assert.deepEqual(lookups, [{ date: "2026-10-28", symbols: ["002380", "600887"] }]);
+    assert.deepEqual(result.unavailable, []);
+});
+
+test("只存日K完整的报告：备用源缺成交额/换手率的报告不存库，下次还能用主源重新生成", async () => {
+    const { saveReports } = require("../../src/services/daily-report");
+    const complete = rows("2026-10-28");
+    const partial = rows("2026-10-28").map((row, index) => (index < 79 ? { ...row, turnover: NaN } : row));
+    const saved = [];
+    await saveReports({ async saveCachedReport(date, symbol) { saved.push([date, symbol]); } }, "2026-10-28", [
+        { meta: { symbol: "600887" }, klines: complete },
+        { meta: { symbol: "002380" }, klines: partial }
+    ]);
+    assert.deepEqual(saved, [["2026-10-28", "600887"]]);
 });

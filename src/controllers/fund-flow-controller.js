@@ -67,7 +67,17 @@ async function runFundFlowTick(store, now = new Date(), services = {}) {
         prepare: content => prepareDelivery(content, senders),
         isBotBlocked: telegram.isBotBlockedError,
         deactivateSubscriber: chatId => store.deactivateSubscriber(chatId),
-        alertContext: { notify: sendMessage, adminChatId: services.adminChatId ?? config.telegram.adminChatId, alerted: services.alerted }
+        alertContext: {
+            notify: sendMessage,
+            adminChatId: services.adminChatId ?? config.telegram.adminChatId,
+            alerted: services.alerted || store.adminAlerts
+        },
+        // 监控状态与推送记录存库（保留7天）
+        ...(typeof store.getFundFlowState === "function" && {
+            loadState: (date, label) => store.getFundFlowState(date, label),
+            saveState: (date, label, state) => store.saveFundFlowState(date, label, state),
+            recordAlert: (date, label, content) => store.saveFundFlowAlert(date, label, content)
+        })
     };
     const outcomes = [];
     for (const monitor of active) outcomes.push(await monitor.tick(now, deps));

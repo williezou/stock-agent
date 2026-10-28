@@ -4,6 +4,7 @@ const { config, requireConfig } = require("../src/config");
 const { createMonitors, runFundFlowTick } = require("../src/controllers/fund-flow-controller");
 const { runLonghuTick } = require("../src/controllers/longhu-controller");
 const { runSchedulerTick } = require("../src/controllers/scheduler-controller");
+const { chinaDateString } = require("../src/models/market/trading-calendar");
 const { delay } = require("../src/lib/async");
 const { formatError } = require("../src/lib/http");
 
@@ -24,12 +25,18 @@ async function startScheduler() {
     const store = await openStore();
     console.log(`⏰ 调度器已启动（工作日北京时间）：资金异动 ${config.fundFlow.windows}，15:30-18:00 收盘报告，17:30-20:30 龙虎榜发布后推送`);
 
+    // 启动时 openStore 已清理过一次过期数据（保留7天），之后每天换日时再清理
+    let prunedDate = chinaDateString();
     let stopped = false;
     const stop = () => { stopped = true; };
     process.on("SIGTERM", stop);
     process.on("SIGINT", stop);
     try {
         while (!stopped) {
+            if (chinaDateString() !== prunedDate) {
+                prunedDate = chinaDateString();
+                await store.pruneExpired().catch(error => console.error(`⚠️ 清理过期数据失败：${formatError(error)}`));
+            }
             // 各任务并行且相互独立：收盘报告耗时较长时不会拖延龙虎榜检查，一个任务出错也不影响另一个
             await Promise.all(JOBS.map(async job => {
                 try {

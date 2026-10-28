@@ -1,6 +1,7 @@
 const { config } = require("../config");
 const { createPool, migrate } = require("./db");
 const { createDeliveryRunRepository } = require("./delivery-run");
+const { createHistoryRepository } = require("./history");
 const { createKlineCacheRepository } = require("./kline-cache");
 const { createSessionRepository } = require("./session");
 const { createSubscriberRepository } = require("./subscriber");
@@ -14,10 +15,17 @@ function createStore({ connectionString = config.databaseUrl } = {}) {
     const watchlist = createWatchlistRepository(pool);
     const deliveryRuns = createDeliveryRunRepository(pool);
     const klineCache = createKlineCacheRepository(pool);
+    const history = createHistoryRepository(pool);
+
+    // 清理超过保留期（7天）的缓存与历史数据；启动时执行一次，调度器每天再执行一次
+    async function pruneExpired() {
+        await klineCache.pruneExpired();
+        await history.pruneHistory();
+    }
 
     async function initialize() {
         await migrate(pool);
-        await klineCache.pruneExpired();
+        await pruneExpired();
     }
 
     // 停用订阅时一并清掉未完成的对话状态
@@ -47,10 +55,12 @@ function createStore({ connectionString = config.databaseUrl } = {}) {
         ...watchlist,
         ...deliveryRuns,
         ...klineCache,
+        ...history,
         bootstrapAdmin,
         close: () => pool.end(),
         deactivateSubscriber,
         initialize,
+        pruneExpired,
         setSubscriberBanned
     };
 }

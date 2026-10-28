@@ -149,71 +149,14 @@ async function loadAdminTargets() {
     }
 }
 
-// allowPartial：多用户调度使用，部分股票日K未就绪时仍为其余股票生成报告，并在unavailable中列出缺失项
-async function buildReports({ dryRun = false, now = new Date(), targets, allowPartial = false, klineCache } = {}) {
-    const { marketService, newsService } = getSharedServices();
-    const healthBefore = marketService.health();
-    const dataHealth = () => healthDelta(healthBefore, marketService.health());
-
-    const activeTargets = targets || await loadAdminTargets();
-    if (!activeTargets.length) {
-        return { skipped: true, reason: "自选股列表为空", date: null, reports: [] };
-    }
-    let reportTargets = activeTargets;
-    const unavailable = [];
-    let klineSets;
-    let selection;
-
-    if (allowPartial && !dryRun) {
-        const { dateStr, weekday } = getChinaClock(now);
-        if (weekday === "Sat" || weekday === "Sun") {
-            return { skipped: true, reason: "周末不发送", date: null, reports: [], unavailable: [] };
-        }
-        if (!isAfterChinaClose(now)) {
-            return { skipped: true, reason: "北京时间15:15前不使用可能尚未收定的日K", date: null, reports: [], unavailable: [] };
-        }
-        const settled = await fetchKlineSets(marketService, activeTargets, { klineCache, dateStr });
-        const ready = [];
-        settled.forEach((result, index) => {
-            const target = activeTargets[index];
-            if (result.status === "rejected") {
-                unavailable.push({ target, reason: formatError(result.reason) });
-                return;
-            }
-            if (!result.value.at(-1) || result.value.at(-1).date !== dateStr) {
-                unavailable.push({ target, reason: `${dateStr}没有完整日K` });
-                return;
-            }
-            ready.push({ target, rows: result.value });
-        });
-        if (!ready.length) {
-            return {
-                skipped: true,
-                reason: `${dateStr}没有完整日K，按非交易日或数据未就绪处理`,
-                date: null,
-                reports: [],
-                unavailable,
-                dataHealth: dataHealth()
-            };
-        }
-        reportTargets = ready.map(item => item.target);
-        klineSets = ready.map(item => item.rows);
-        selection = { date: dateStr, reason: "" };
-    } else {
-        const settled = await fetchKlineSets(marketService, activeTargets);
-        const failed = settled.find(result => result.status === "rejected");
-        if (failed) throw failed.reason;
-        klineSets = settled.map(result => result.value);
-        selection = selectReportDate(klineSets, { dryRun, now });
-    }
-    if (!selection.date) return { skipped: true, reason: selection.reason, date: null, reports: [] };
-
-    const contextItems = await getContextItems(newsService, reportTargets);
-    const reports = reportTargets.map((meta, index) => {
-        const rows = klineSets[index].filter(item => item.date <= selection.date);
+// 由日K与新闻公告生成每只股票的报告（技术分析 + 交易计划）
+async function composeReports(newsService, targets, klineSets, date) {
+    const contextItems = await getContextItems(newsService, targets);
+    return targets.map((meta, index) => {
+        const rows = klineSets[index].filter(item => item.date <= date);
         const analysis = analyzeKlines(rows);
-        if (analysis.latest.date !== selection.date) {
-            throw new Error(`${meta.name}缺少${selection.date}日K`);
+        if (analysis.latest.date !== date) {
+            throw new Error(`${meta.name}缺少${date}日K`);
         }
         return {
             meta,
@@ -224,7 +167,96 @@ async function buildReports({ dryRun = false, now = new Date(), targets, allowPa
             announcements: contextItems[index].announcements
         };
     });
-    return { skipped: false, reason: "", date: selection.date, reports, unavailable, dataHealth: dataHealth() };
+}
+
+// 当日已生成的报告存库（保留7天）：同一天里其他用户追踪同一只股票时直接复用，不再拉取日K与新闻；读写失败时按未缓存处理
+async function loadCachedReports(reportCache, dateStr, targets) {
+    if (!reportCache) return new Map();
+    return reportCache.getCachedReports(dateStr, targets.map(target => target.symbol)).catch(error => {
+        console.error(`⚠️ 读取已存报告失败，将重新生成：${formatError(error)}`);
+        return new Map();
+    });
+}
+
+// 与日K缓存一致，只存日K完整的报告：备用源（腾讯）缺历史成交额/换手率，存下来会让当天其余用户一直拿到缺字段的版本，
+// 不存则下次生成时还有机会用主源的完整数据
+async function saveReports(reportCache, dateStr, reports) {
+    if (!reportCache) return;
+    for (const report of reports.filter(item => isCompleteKlines(item.klines))) {
+        await reportCache.saveCachedReport(dateStr, report.meta.symbol, report)
+            .catch(error => console.error(`⚠️ 保存${report.meta.symbol}报告失败：${formatError(error)}`));
+    }
+}
+
+// allowPartial：多用户调度使用，部分股票日K未就绪时仍为其余股票生成报告，并在unavailable中列出缺失项。
+// reportCache：当日已存的报告直接复用，只为尚未生成的股票拉取数据
+async function buildReports({ dryRun = false, now = new Date(), targets, allowPartial = false, klineCache, reportCache } = {}) {
+    const { marketService, newsService } = getSharedServices();
+    const healthBefore = marketService.health();
+    const dataHealth = () => healthDelta(healthBefore, marketService.health());
+
+    const activeTargets = targets || await loadAdminTargets();
+    if (!activeTargets.length) {
+        return { skipped: true, reason: "自选股列表为空", date: null, reports: [] };
+    }
+
+    if (allowPartial && !dryRun) {
+        const { dateStr, weekday } = getChinaClock(now);
+        if (weekday === "Sat" || weekday === "Sun") {
+            return { skipped: true, reason: "周末不发送", date: null, reports: [], unavailable: [] };
+        }
+        if (!isAfterChinaClose(now)) {
+            return { skipped: true, reason: "北京时间15:15前不使用可能尚未收定的日K", date: null, reports: [], unavailable: [] };
+        }
+        const cached = await loadCachedReports(reportCache, dateStr, activeTargets);
+        const pending = activeTargets.filter(target => !cached.has(target.symbol));
+        const unavailable = [];
+        const built = new Map();
+        if (pending.length) {
+            const settled = await fetchKlineSets(marketService, pending, { klineCache, dateStr });
+            const ready = [];
+            settled.forEach((result, index) => {
+                const target = pending[index];
+                if (result.status === "rejected") {
+                    unavailable.push({ target, reason: formatError(result.reason) });
+                    return;
+                }
+                if (!result.value.at(-1) || result.value.at(-1).date !== dateStr) {
+                    unavailable.push({ target, reason: `${dateStr}没有完整日K` });
+                    return;
+                }
+                ready.push({ target, rows: result.value });
+            });
+            if (ready.length) {
+                const reports = await composeReports(newsService, ready.map(item => item.target), ready.map(item => item.rows), dateStr);
+                await saveReports(reportCache, dateStr, reports);
+                for (const report of reports) built.set(report.meta.symbol, report);
+            }
+        }
+        const reports = activeTargets
+            .map(target => cached.get(target.symbol) || built.get(target.symbol))
+            .filter(Boolean);
+        if (!reports.length) {
+            return {
+                skipped: true,
+                reason: `${dateStr}没有完整日K，按非交易日或数据未就绪处理`,
+                date: null,
+                reports: [],
+                unavailable,
+                dataHealth: dataHealth()
+            };
+        }
+        return { skipped: false, reason: "", date: dateStr, reports, unavailable, dataHealth: dataHealth() };
+    }
+
+    const settled = await fetchKlineSets(marketService, activeTargets);
+    const failed = settled.find(result => result.status === "rejected");
+    if (failed) throw failed.reason;
+    const klineSets = settled.map(result => result.value);
+    const selection = selectReportDate(klineSets, { dryRun, now });
+    if (!selection.date) return { skipped: true, reason: selection.reason, date: null, reports: [] };
+    const reports = await composeReports(newsService, activeTargets, klineSets, selection.date);
+    return { skipped: false, reason: "", date: selection.date, reports, unavailable: [], dataHealth: dataHealth() };
 }
 
 module.exports = {
@@ -232,5 +264,6 @@ module.exports = {
     commonLatestDate,
     fetchKlineSets,
     prioritize,
+    saveReports,
     selectReportDate
 };
