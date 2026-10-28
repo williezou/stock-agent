@@ -6,6 +6,7 @@ const { LEGACY_BUTTONS, removeKeyboardMarkup } = require("../../src/views/bot-vi
 function createMemoryStore(initial = [], registered = true) {
     const items = new Map([["100", new Map(initial.map(item => [item.symbol, item]))]]);
     const sessions = new Map();
+    const profileUpdates = [];
     const subscribers = new Map(registered ? [["100", { chat_id: "100", status: "active" }]] : []);
     const bucket = chatId => {
         const key = String(chatId);
@@ -13,6 +14,7 @@ function createMemoryStore(initial = [], registered = true) {
         return items.get(key);
     };
     return {
+        profileUpdates,
         async list(chatId) { return [...bucket(chatId).values()]; },
         async get(chatId, symbol) { return bucket(chatId).get(symbol) || null; },
         async upsert(chatId, target) { bucket(chatId).set(target.symbol, target); return target; },
@@ -53,6 +55,12 @@ function createMemoryStore(initial = [], registered = true) {
             if (!subscriber) return false;
             subscriber.fund_flow_enabled = enabled;
             return true;
+        },
+        async updateSubscriberProfile(chatId, { username, firstName }) {
+            const subscriber = subscribers.get(String(chatId));
+            profileUpdates.push(String(chatId));
+            subscriber.username = username;
+            subscriber.first_name = firstName || subscriber.first_name;
         },
         async setSubscriberBanned(chatId, banned) {
             const subscriber = subscribers.get(String(chatId));
@@ -271,15 +279,32 @@ test("/users 只对管理员生效：列出启用/停用人数、自选股数量
     assert.match(text, /开启龙虎榜 0 人，开启资金异动 1 人/);
     assert.match(text, /自选股汇总（2只，按关注人数）<\/b>\n中际旭创 300308 · 1人\n贵州茅台 600519 · 1人/, "汇总只算启用用户（停用的管理员也关注了茅台）");
     assert.match(text, /1\. A&lt;b&gt;（@friend） <code>300<\/code>\n　自选2只 · 龙虎榜关 · 2026-10-28\n　贵州茅台、中际旭创/);
-    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 100 <code>100<\/code>\n　自选1只 · 2026-10-28\n　贵州茅台/);
+    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 测试 <code>100<\/code>\n　自选1只 · 2026-10-28\n　贵州茅台/);
 
     await controller.handleUpdate(privateMessage("/users", 300, 300));
     assert.doesNotMatch(sent.at(-1).text, /订阅用户/, "非管理员不能查看");
 });
 
+test("每次发消息时同步用户名与名字：有变化才写库，删掉用户名也会同步", async () => {
+    const { controller, store } = setup();
+    const message = (text, from) => ({ ...privateMessage(text), message: { ...privateMessage(text).message, from } });
+    await controller.handleUpdate(message("/list", { id: 100, username: "newname", first_name: "小明" }));
+    assert.deepEqual(store.profileUpdates, ["100"]);
+    assert.equal((await store.getSubscriber(100)).username, "newname");
+
+    await controller.handleUpdate(message("/list", { id: 100, username: "newname", first_name: "小明" }));
+    assert.deepEqual(store.profileUpdates, ["100"], "没有变化不写库");
+
+    await controller.handleUpdate(message("/list", { id: 100, first_name: "小明" }));
+    assert.equal((await store.getSubscriber(100)).username, null, "删掉用户名后同步为空");
+    assert.equal(store.profileUpdates.length, 2);
+});
+
 test("/ban、/unban：管理员按用户ID或@用户名拉黑；被拉黑的用户消息一律不回复、/start 也不能重新启用", async () => {
     const { controller, sent, store } = setup([], { adminChatId: "100" });
     await store.registerSubscriber({ chatId: 300, username: "Friend", firstName: "小明" });
+    // 用户300本人发的消息，资料与登记的一致（发消息会同步用户名和名字）
+    const fromFriend = text => ({ message: { chat: { id: 300, type: "private" }, from: { id: 300, username: "Friend", first_name: "小明" }, text } });
 
     await controller.handleUpdate(privateMessage("/ban"));
     assert.match(sent.at(-1).text, /用法/);
@@ -293,9 +318,9 @@ test("/ban、/unban：管理员按用户ID或@用户名拉黑；被拉黑的用�
     assert.equal((await store.getSubscriber(300)).status, "banned");
 
     const before = sent.length;
-    await controller.handleUpdate(privateMessage("/list", 300, 300));
-    await controller.handleUpdate(privateMessage("/start", 300, 300));
-    await controller.handleUpdate(privateMessage("你好", 300, 300));
+    await controller.handleUpdate(fromFriend("/list"));
+    await controller.handleUpdate(fromFriend("/start"));
+    await controller.handleUpdate(fromFriend("你好"));
     assert.equal(sent.length, before, "被拉黑后不回复任何消息");
     assert.equal((await store.getSubscriber(300)).status, "banned", "/start 不能解除拉黑");
     assert.equal(await store.deactivateSubscriber(300), false, "屏蔽机器人等停用操作不会覆盖拉黑状态");
@@ -321,7 +346,7 @@ test("/ban、/unban：管理员按用户ID或@用户名拉黑；被拉黑的用�
     assert.match(sent.at(-1).text, /有多位用户用过用户名 @FRIEND，请改用用户ID/);
     assert.equal((await store.getSubscriber(600)).status, "active");
 
-    await controller.handleUpdate(privateMessage("/ban 100", 300, 300));
+    await controller.handleUpdate(fromFriend("/ban 100"));
     assert.equal((await store.getSubscriber(100)).status, "active", "非管理员发 /ban 无效");
     assert.doesNotMatch(sent.at(-1).text, /拉黑/);
 });

@@ -85,6 +85,15 @@ function createSubscriberRepository(pool) {
         return result.rows;
     }
 
+    // 用户在Telegram里改了用户名或名字时同步（用户名可被删除，置为空；名字缺失时保留原值）
+    async function updateSubscriberProfile(chatId, { username, firstName }) {
+        await pool.query(
+            `UPDATE telegram_subscribers SET username = $2, first_name = COALESCE($3, first_name), updated_at = NOW()
+             WHERE chat_id = $1`,
+            [String(chatId), username || null, firstName || null]
+        );
+    }
+
     // 管理员拉黑/解除：拉黑后不再推送、消息不回复；解除只对已拉黑的用户生效（不会把自己 /stop 的用户重新启用），
     // 恢复为启用。返回更新后的记录，没有符合条件的记录时为null
     async function setSubscriberBanned(chatId, banned) {
@@ -142,7 +151,8 @@ function createSubscriberRepository(pool) {
         registerSubscriber,
         setFundFlowEnabled,
         setSubscriberBanned,
-        setLonghuEnabled
+        setLonghuEnabled,
+        updateSubscriberProfile
     };
 }
 

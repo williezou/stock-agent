@@ -104,6 +104,21 @@ function createBotController({
         return reply(chatId, MESSAGES.registered);
     }
 
+    // 已登记的用户每次发消息时，用户名或名字有变化就同步（没变化不写库）；同步失败不影响处理消息
+    async function syncProfile(subscriber, from) {
+        if (!subscriber || !from) return;
+        const username = from.username || null;
+        const firstName = from.first_name || null;
+        if (username === (subscriber.username || null) && (!firstName || firstName === subscriber.first_name)) return;
+        try {
+            await store.updateSubscriberProfile(subscriber.chat_id, { username, firstName });
+            subscriber.username = username;
+            subscriber.first_name = firstName || subscriber.first_name;
+        } catch (error) {
+            console.error(`⚠️ 同步${subscriber.chat_id}的用户名失败：${formatError(error)}`);
+        }
+    }
+
     // /ban、/unban：参数为用户ID（chat_id）或@用户名；用户名对应多条记录时要求改用用户ID，避免拉黑错人
     async function findSubscribers(target) {
         if (/^-?\d+$/.test(target)) {
@@ -238,6 +253,7 @@ function createBotController({
         // 群聊静默忽略，避免繁忙群组耗尽共享的Telegram限流额度
         if (!isPrivateChat(message.chat)) return;
         const subscriber = await store.getSubscriber(chatId);
+        await syncProfile(subscriber, message.from);
         // 被管理员拉黑的用户：任何消息（包括 /start 重新注册）都不回复
         if (subscriber?.status === "banned" && !isAdmin(chatId)) return;
 
