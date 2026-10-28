@@ -19,7 +19,7 @@ test("龙虎榜消息包含分市场统计、净买入/净卖出排行与关闭�
     assert.match(text, /上榜15只（沪12 深2 北1）/);
     assert.match(text, /净买入前10/);
     assert.match(text, /净卖出前2/);
-    assert.match(text, /1\. 股票000001 <a[^>]+>🔴<\/a> <a[^>]+>🌸<\/a> <a href="https:\/\/data\.eastmoney\.com\/stock\/lhb,2026-10-27,000001\.html">📋<\/a> <code>000001<\/code> -9\.90%｜净额 -2\.00亿元/);
+    assert.match(text, /1\. <a href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.000001\.html">股票000001<\/a> <a href="https:\/\/data\.eastmoney\.com\/stock\/lhb,2026-10-27,000001\.html">📋<\/a> <code>000001<\/code> -9\.90%｜净额 -2\.00亿元/);
     assert.match(text, /\/longhu off/);
     assert.ok(text.indexOf("600100") < text.indexOf("600101"));
     assert.doesNotMatch(text, /600111/, "第12名不在净买入前10");
@@ -72,7 +72,7 @@ test("图片说明只含概况；股票按钮每行3个，净卖出另起一行�
     assert.ok(rows.flat().every(button => Buffer.byteLength(button.callback_data) <= 64), "回调数据不超过64字节");
     assert.deepEqual(parseLonghuCallbackData("lhb:600100:20261027"), { symbol: "600100", date: "2026-10-27" });
     assert.equal(parseLonghuCallbackData("delete:600100"), null);
-    assert.deepEqual(formatSeatKeyboard({ date: "2026-10-27", symbol: "002249" }).inline_keyboard[0].map(button => button.text), ["🔴 东方财富", "🌸 同花顺", "💻 电脑版"]);
+    assert.deepEqual(formatSeatKeyboard({ date: "2026-10-27", symbol: "002249" }).inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "电脑版"]);
 });
 
 test("可见长度不计HTML标签与链接地址，实体按一个字计", () => {
@@ -108,7 +108,7 @@ test("席位明细：营业部名称精简、金额紧凑、附手机版行情�
             }]
         }
     });
-    assert.match(text, /<b>大洋电机<\/b> <a[^>]+>🔴<\/a> <a[^>]+>🌸<\/a> <code>002249<\/code> \+10\.00%/);
+    assert.match(text, /<a href="[^"]+"><b>大洋电机<\/b><\/a> <code>002249<\/code> \+10\.00%/);
     assert.match(text, /📌 <b>日涨幅偏离7%<\/b>/);
     assert.match(text, /1\. 国泰海通证券武汉紫阳东路\n　买1\.22亿 卖4万 净\+1\.22亿/);
     assert.match(text, /href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.002249\.html">东方财富/);

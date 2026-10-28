@@ -28,7 +28,7 @@ function summaryText({ since, inflow, outflow }) {
     return `较${since}：主力加速流入${inflow.length}只、加速流出${outflow.length}只`;
 }
 
-// 每只股票一行：自选股加 ⭐，名称后的 🔴 🌸 可跳转App，区间变化加粗；detailed 时附当日涨跌幅（文字版没有图表可看）。
+// 每只股票一行：自选股加 ⭐，名称可跳转东方财富，区间变化加粗；detailed 时附当日涨跌幅（文字版没有图表可看）。
 // 东方财富的名称里有补齐用的空格（如“五 粮 液”），去掉以免占宽
 function stockLine(row, watchSymbols, detailed) {
     const star = watchSymbols.has(row.symbol) ? "⭐" : "";

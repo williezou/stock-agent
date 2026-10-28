@@ -288,7 +288,7 @@ test("龙虎榜席位以表格图片发送，画图失败时退回文字", async
     await ok.controller.handleUpdate(privateMessage("/start lhb_002249_20261027"));
     assert.equal(ok.sent.photos.length, 1);
     assert.match(ok.sent.photos[0].caption, /大洋电机.*龙虎榜席位/);
-    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["🔴 东方财富", "🌸 同花顺", "💻 电脑版"]);
+    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "电脑版"]);
     assert.deepEqual(ok.sent.texts, []);
 
     const broken = build(() => { throw new Error("未找到可用的中文字体"); });

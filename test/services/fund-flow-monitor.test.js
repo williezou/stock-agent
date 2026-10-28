@@ -102,7 +102,7 @@ test("监控流程：首轮建起点，之后推送异动；同一分钟不重�
     assert.deepEqual(first.content.inflow.map(r => r.symbol), ["A"], "B 只增加1000万，未达门槛");
     assert.equal(first.content.since, "14:30");
     assert.match(first.text, /尾盘资金异动｜14:31/);
-    assert.match(first.text, /⭐股A .*<b>\+2\.00亿<\/b>/);
+    assert.match(first.text, /⭐<a [^>]+>股A<\/a> <b>\+2\.00亿<\/b>/);
     assert.match(first.text, /非交易所官方口径/);
     assert.doesNotMatch(second.text, /⭐/);
 
@@ -151,12 +151,12 @@ test("推送视图：图片说明列出股票（自选股加⭐、名称去空�
     const watchSymbols = new Set(["000858"]);
     const caption = formatFundFlowCaption({ ...CONTENT, watchSymbols });
     assert.match(caption, /<b>🚨 尾盘资金异动｜14:45<\/b>\n较14:30：主力加速流入1只、加速流出1只/);
-    assert.match(caption, /<b>🔺 主力加速流入<\/b>\n中际旭创 <a href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.300308\.html">🔴<\/a> .*<b>\+8\.75亿<\/b>\n/);
-    assert.match(caption, /<b>🔻 主力加速流出<\/b>\n⭐五粮液 .*<b>≤-7951万<\/b>\n/);
+    assert.match(caption, /<b>🔺 主力加速流入<\/b>\n<a href="https:\/\/wap\.eastmoney\.com\/quote\/stock\/0\.300308\.html">中际旭创<\/a> <b>\+8\.75亿<\/b>\n/);
+    assert.match(caption, /<b>🔻 主力加速流出<\/b>\n⭐<a [^>]+>五粮液<\/a> <b>≤-7951万<\/b>\n/);
     assert.doesNotMatch(caption, /<code>|-6\.04%/, "图片说明不带代码和涨跌幅");
     assert.match(caption, /非交易所官方口径/);
     const text = formatFundFlowAlert({ ...CONTENT, watchSymbols });
-    assert.match(text, /⭐五粮液 .*<b>≤-7951万<\/b> -6\.04%/);
+    assert.match(text, /⭐<a [^>]+>五粮液<\/a> <b>≤-7951万<\/b> -6\.04%/);
 });
 
 test("资金异动图表生成有效PNG", () => {
@@ -180,7 +180,7 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
     assert.equal(photos[0].filename, "fund-flow-1445.png");
     assert.equal(photos[1].photo, "large");
     assert.equal(photos[0].options, undefined, "不带按钮");
-    assert.match(photos[1].caption, /⭐中际旭创/);
+    assert.match(photos[1].caption, /⭐<a [^>]+>中际旭创<\/a>/);
 
     const texts = [];
     const fallback = prepareDelivery(CONTENT, {

@@ -79,7 +79,7 @@ function seatLinkUrl(symbol, date, botUsername) {
         : longhuDetailUrl(symbol, date);
 }
 
-// 股票名称经 StockLink 渲染（🔴 🌸 跳转App），龙虎榜额外附 📋（查看席位）
+// 股票名称经 StockLink 渲染（名称链接东方财富，可跳转App），龙虎榜额外附 📋（查看席位）
 function longhuStock(item, date, botUsername, options = {}) {
     return StockLink.of(item).html({ ...options, extraLinks: [{ label: SEAT_ICON, url: seatLinkUrl(item.symbol, date, botUsername) }] });
 }
@@ -111,7 +111,7 @@ function overviewLine(summary) {
 const SOURCE_NOTE = "数据来源：沪深北交易所当日公开信息（同花顺/东方财富整理），仅供参考，不构成投资建议。";
 const OPT_OUT_NOTE = "发送 /longhu off 可关闭龙虎榜推送。";
 const SEAT_ICON = "📋";
-const LINK_NOTE = `点${SEAT_ICON}查看当日买卖席位；🔴 东方财富 🌸 同花顺可跳转App。`;
+const LINK_NOTE = `点${SEAT_ICON}查看当日买卖席位；点股票名称打开东方财富行情（可跳转App）。`;
 const BUTTON_NOTE = "点下方股票名称查看当日买卖席位（前10只为净买入，其后为净卖出）。";
 
 // 文字版（图表生成失败时的后备）
@@ -171,10 +171,10 @@ function formatLonghuKeyboard({ date, board }) {
     };
 }
 
-// 席位表格图片下方：[🔴 东方财富] [🌸 同花顺] [💻 电脑版]
+// 席位表格图片下方：[东方财富] [同花顺] [电脑版]
 function formatSeatKeyboard({ date, symbol }) {
     return {
-        inline_keyboard: [new StockLink(symbol).appButtonRow([{ text: "💻 电脑版", url: longhuDetailUrl(symbol, date) }])]
+        inline_keyboard: [new StockLink(symbol).appButtonRow([{ text: "电脑版", url: longhuDetailUrl(symbol, date) }])]
     };
 }
 
