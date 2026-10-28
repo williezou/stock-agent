@@ -21,6 +21,13 @@ function createMemoryStore(initial = [], registered = true) {
         async getSession(chatId) { return sessions.get(String(chatId)) || null; },
         async clearSession(chatId) { sessions.delete(String(chatId)); },
         async getSubscriber(chatId) { return subscribers.get(String(chatId)) || null; },
+        async listSubscriberSummaries() {
+            return [...subscribers.values()].map(subscriber => ({
+                watch_count: bucket(subscriber.chat_id).size,
+                created_date: "2026-10-28",
+                ...subscriber
+            }));
+        },
         async registerSubscriber({ chatId, userId, username, firstName, maxActive = 0 }) {
             const current = subscribers.get(String(chatId));
             const active = [...subscribers.values()].filter(item => item.status === "active").length;
@@ -236,6 +243,25 @@ test("/flow 切换资金异动提醒，并支持 on/off 显式设置", async () 
     assert.match(sent.at(-1).text, /已开启资金异动提醒/);
     await controller.handleUpdate(privateMessage("/flow maybe"));
     assert.match(sent.at(-1).text, /用法/);
+});
+
+test("/users 只对管理员生效：列出启用/停用人数、自选股数量与关闭的推送，管理员停用后也能查看", async () => {
+    const { controller, sent, store } = setup([{ symbol: "600519", name: "贵州茅台" }], { adminChatId: "100" });
+    await store.registerSubscriber({ chatId: 300, username: "friend", firstName: "A<b>" });
+    await store.setLonghuEnabled(300, false);
+    await store.registerSubscriber({ chatId: 400, firstName: "Gone" });
+    await store.deactivateSubscriber(400);
+    await store.deactivateSubscriber(100);
+
+    await controller.handleUpdate(privateMessage("/users"));
+    const text = sent.at(-1).text;
+    assert.match(text, /订阅用户：启用 1\/\d+，停用 2/);
+    assert.match(text, /开启龙虎榜 0 人，开启资金异动 1 人/);
+    assert.match(text, /1\. A&lt;b&gt;（@friend）\n　自选0只 · 龙虎榜关 · 2026-10-28/);
+    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 100\n　自选1只/);
+
+    await controller.handleUpdate(privateMessage("/users", 300, 300));
+    assert.doesNotMatch(sent.at(-1).text, /订阅用户/, "非管理员不能查看");
 });
 
 test("点击龙虎榜深层链接：订阅者收到席位明细，未订阅者不会被当作邀请码注册", async () => {

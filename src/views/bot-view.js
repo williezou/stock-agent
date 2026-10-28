@@ -1,3 +1,4 @@
+const { escapeHtml } = require("./format");
 const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
 // 机器人的全部回复文案、Menu命令与键盘布局
@@ -11,6 +12,11 @@ const BOT_COMMANDS = [
     { command: "flow", description: "开启/关闭盘中资金异动提醒" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
+];
+
+// 只在管理员会话的Menu里显示的命令（Telegram按会话设置命令范围）
+const ADMIN_COMMANDS = [
+    { command: "users", description: "查看订阅用户（管理员）" }
 ];
 
 // 旧版常驻按钮的文字；按钮键盘已由Menu命令取代，保留识别以兼容尚未刷新的聊天
@@ -68,6 +74,36 @@ function watchlistText(targets, maxStocks) {
     return `<b>每日追踪列表（${targets.length}/${maxStocks}）</b>\n${lines.join("\n")}\n<i>${STOCK_LINK_LEGEND}</i>`;
 }
 
+// /users 名单最多列出的人数，避免超过Telegram单条消息长度
+const USERS_LIST_LIMIT = 60;
+
+function userLine(user, index) {
+    const name = user.first_name || user.username || user.chat_id;
+    const handle = user.username ? `（@${user.username}）` : "";
+    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关"].filter(Boolean);
+    const details = [`自选${user.watch_count}只`, ...off, user.created_date].join(" · ");
+    return `${index + 1}. ${escapeHtml(name)}${escapeHtml(handle)}\n　${details}`;
+}
+
+// 管理员查看订阅用户：启用/停用人数与名额，以及每人的自选股数量、关闭的推送和注册日期
+function usersText(users, maxSubscribers) {
+    const active = users.filter(user => user.status === "active");
+    const inactive = users.filter(user => user.status !== "active");
+    const lines = [
+        `<b>👥 订阅用户：启用 ${active.length}${maxSubscribers > 0 ? `/${maxSubscribers}` : ""}，停用 ${inactive.length}</b>`,
+        `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人`
+    ];
+    const section = (title, list) => {
+        if (!list.length) return;
+        lines.push("", `<b>${title}</b>`, ...list.slice(0, USERS_LIST_LIMIT).map(userLine));
+        if (list.length > USERS_LIST_LIMIT) lines.push(`……另有 ${list.length - USERS_LIST_LIMIT} 人未列出`);
+    };
+    section("启用", active);
+    section("停用（/stop 或屏蔽了机器人）", inactive);
+    lines.push("", "<i>只统计发过 /start 的用户。</i>");
+    return lines.join("\n");
+}
+
 function alreadyTrackedText(symbol, name) {
     return `${new StockLink(symbol, name).html()} 已在追踪列表中。`;
 }
@@ -120,6 +156,7 @@ function confirmRemoveMarkup(symbol) {
 }
 
 module.exports = {
+    ADMIN_COMMANDS,
     BOT_COMMANDS,
     LEGACY_BUTTONS,
     MESSAGES,
@@ -133,6 +170,7 @@ module.exports = {
     removeChoicesMarkup,
     removeKeyboardMarkup,
     removedText,
+    usersText,
     watchlistFullText,
     watchlistText
 };

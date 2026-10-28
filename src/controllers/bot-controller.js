@@ -104,6 +104,10 @@ function createBotController({
         return reply(chatId, MESSAGES.registered);
     }
 
+    async function showUsers(chatId) {
+        return reply(chatId, view.usersText(await store.listSubscriberSummaries(), maxSubscribers));
+    }
+
     async function showList(chatId) {
         const targets = await store.list(chatId);
         if (!targets.length) return reply(chatId, MESSAGES.emptyList);
@@ -219,6 +223,8 @@ function createBotController({
             return sendMessage(chatId, inviteCode ? MESSAGES.registerWithInvite : MESSAGES.registerFirst);
         }
         if (startArgument !== null) return register(message, startArgument.trim());
+        // 管理员命令不受本人订阅状态影响（管理员 /stop 后也能查看）
+        if (isAdmin(chatId) && isCommand(text, "users")) return showUsers(chatId);
         const subscriber = await store.getSubscriber(chatId);
         if (subscriber?.status !== "active") {
             // 陌生人的闲聊不回复；已停用（或屏蔽后又解除）的用户仍给出恢复提示

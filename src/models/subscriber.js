@@ -85,6 +85,18 @@ function createSubscriberRepository(pool) {
         return result.rows;
     }
 
+    // 管理员 /users：全部订阅者及其推送开关、启用中的自选股数量，按注册时间排序
+    async function listSubscriberSummaries() {
+        const result = await pool.query(
+            `SELECT s.chat_id, s.username, s.first_name, s.status, s.longhu_enabled, s.fund_flow_enabled,
+                    to_char(s.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS created_date,
+                    (SELECT COUNT(*)::int FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE) AS watch_count
+             FROM telegram_subscribers s
+             ORDER BY s.created_at, s.chat_id`
+        );
+        return result.rows;
+    }
+
     // 确保记录存在但不改变已有状态（不覆盖用户的/stop或被屏蔽后的停用）
     async function ensureSubscriber(chatId) {
         await pool.query(
@@ -100,6 +112,7 @@ function createSubscriberRepository(pool) {
         ensureSubscriber,
         getSubscriber,
         listFundFlowSubscribers,
+        listSubscriberSummaries,
         registerSubscriber,
         setFundFlowEnabled,
         setLonghuEnabled

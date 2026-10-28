@@ -1,7 +1,7 @@
 const { config } = require("../config");
 const { WEBHOOK_PATH } = require("../constants");
 const telegram = require("../gateways/telegram");
-const { BOT_COMMANDS, MESSAGES, removeKeyboardMarkup } = require("../views/bot-view");
+const { ADMIN_COMMANDS, BOT_COMMANDS, MESSAGES, removeKeyboardMarkup } = require("../views/bot-view");
 
 const ALLOWED_UPDATES = ["message", "callback_query"];
 
@@ -31,7 +31,7 @@ async function configureTelegramWebhook(options = {}) {
         secret_token: secret,
         allowed_updates: ALLOWED_UPDATES
     });
-    await telegram.telegramRequest("setMyCommands", { commands: BOT_COMMANDS });
+    await setMenuCommands();
 
     if (options.announce) {
         if (!chatId) throw new Error("缺少TELEGRAM_CHAT_ID");
@@ -43,7 +43,18 @@ async function configureTelegramWebhook(options = {}) {
 // 长轮询模式：删除webhook（保留未处理消息）并注册Menu命令
 async function configureTelegramPolling() {
     await telegram.telegramRequest("deleteWebhook", { drop_pending_updates: false });
+    await setMenuCommands();
+}
+
+// 所有人的Menu命令；管理员会话额外显示管理员命令（按会话设置的命令优先于默认命令）
+async function setMenuCommands() {
     await telegram.telegramRequest("setMyCommands", { commands: BOT_COMMANDS });
+    if (config.telegram.adminChatId) {
+        await telegram.telegramRequest("setMyCommands", {
+            commands: [...BOT_COMMANDS, ...ADMIN_COMMANDS],
+            scope: { type: "chat", chat_id: config.telegram.adminChatId }
+        });
+    }
 }
 
 module.exports = {
