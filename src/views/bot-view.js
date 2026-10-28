@@ -1,5 +1,5 @@
 const { TELEGRAM_TEXT_LIMIT } = require("../constants");
-const { visibleLength } = require("../lib/telegram-text");
+const { MAX_ENTITIES, entityCount, visibleLength } = require("../lib/telegram-text");
 const { escapeHtml } = require("./format");
 const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 
@@ -18,7 +18,9 @@ const BOT_COMMANDS = [
 
 // 只在管理员会话的Menu里显示的命令（Telegram按会话设置命令范围）
 const ADMIN_COMMANDS = [
-    { command: "users", description: "查看订阅用户（管理员）" }
+    { command: "users", description: "查看订阅用户（管理员）" },
+    { command: "ban", description: "拉黑用户：/ban 用户ID或@用户名" },
+    { command: "unban", description: "解除拉黑：/unban 用户ID或@用户名" }
 ];
 
 // 旧版常驻按钮的文字；按钮键盘已由Menu命令取代，保留识别以兼容尚未刷新的聊天
@@ -54,6 +56,9 @@ const MESSAGES = {
     operationFailed: "❌ 操作失败，请稍后重试。",
     seatPending: "正在生成席位表格，请稍候…",
     seatRecentlySent: "席位已发送，请查看上方消息",
+    banUsage: "用法：<code>/ban 用户ID</code> 或 <code>/ban @用户名</code>；用户ID可在 /users 里点击复制。",
+    unbanUsage: "用法：<code>/unban 用户ID</code> 或 <code>/unban @用户名</code>。",
+    cannotBanAdmin: "不能拉黑管理员本人。",
     invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
@@ -85,7 +90,7 @@ function userBlock(user, index) {
     const watchlist = user.watchlist || [];
     const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关"].filter(Boolean);
     const lines = [
-        `${index + 1}. ${escapeHtml(name)}${escapeHtml(handle)}`,
+        `${index + 1}. ${escapeHtml(name)}${escapeHtml(handle)} <code>${escapeHtml(user.chat_id)}</code>`,
         `　${[`自选${watchlist.length}只`, ...off, user.created_date].join(" · ")}`
     ];
     if (watchlist.length) lines.push(`　${watchlist.map(stock => escapeHtml(stock.name || stock.symbol)).join("、")}`);
@@ -105,13 +110,13 @@ function watchlistSummary(activeUsers) {
     return [...stocks.values()].sort((a, b) => b.count - a.count || a.symbol.localeCompare(b.symbol));
 }
 
-// 按段落装箱成多条消息：段落不拆开，单条不超过 USERS_MESSAGE_LIMIT；全是纯文本与少量加粗，不会触及格式实体上限
+// 按段落装箱成多条消息：段落不拆开，单条不超过 USERS_MESSAGE_LIMIT，格式实体（每人一个可复制的ID）不超过Telegram上限
 function packMessages(blocks) {
     const messages = [];
     let current = "";
     for (const block of blocks) {
         const next = current ? `${current}\n${block}` : block;
-        if (current && visibleLength(next) > USERS_MESSAGE_LIMIT) {
+        if (current && (visibleLength(next) > USERS_MESSAGE_LIMIT || entityCount(next) > MAX_ENTITIES)) {
             messages.push(current);
             current = block;
         } else {
@@ -126,9 +131,10 @@ function packMessages(blocks) {
 // 返回多条消息（人数多时自动分条）
 function usersMessages(users, maxSubscribers) {
     const active = users.filter(user => user.status === "active");
-    const inactive = users.filter(user => user.status !== "active");
+    const banned = users.filter(user => user.status === "banned");
+    const inactive = users.filter(user => user.status !== "active" && user.status !== "banned");
     const blocks = [
-        `<b>👥 订阅用户：启用 ${active.length}${maxSubscribers > 0 ? `/${maxSubscribers}` : ""}，停用 ${inactive.length}</b>\n` +
+        `<b>👥 订阅用户：启用 ${active.length}${maxSubscribers > 0 ? `/${maxSubscribers}` : ""}，停用 ${inactive.length}，拉黑 ${banned.length}</b>\n` +
             `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人`
     ];
     const summary = watchlistSummary(active);
@@ -142,7 +148,8 @@ function usersMessages(users, maxSubscribers) {
     };
     section("启用", active);
     section("停用（/stop 或屏蔽了机器人）", inactive);
-    blocks.push("\n<i>只统计发过 /start 的用户；汇总只算启用中的用户。</i>");
+    section("已拉黑（/unban 用户ID 解除）", banned);
+    blocks.push("\n<i>只统计发过 /start 的用户；汇总只算启用中的用户。点用户ID可复制，用于 /ban、/unban。</i>");
     return packMessages(blocks);
 }
 
@@ -175,6 +182,32 @@ function fundFlowToggledText(enabled) {
         : "已关闭资金异动提醒，其他推送不受影响。发送 /flow on 可重新开启。";
 }
 
+function subscriberLabel(subscriber) {
+    const name = subscriber.first_name || subscriber.username || subscriber.chat_id;
+    const handle = subscriber.username ? `（@${subscriber.username}）` : "";
+    return `${escapeHtml(name)}${escapeHtml(handle)} <code>${escapeHtml(subscriber.chat_id)}</code>`;
+}
+
+function bannedText(subscriber) {
+    return `🚫 已拉黑 ${subscriberLabel(subscriber)}：不再接收任何推送，发给机器人的消息不予回复，自选股保留。发送 <code>/unban ${escapeHtml(subscriber.chat_id)}</code> 可解除。`;
+}
+
+function unbannedText(subscriber) {
+    return `✅ 已解除拉黑 ${subscriberLabel(subscriber)}，恢复为启用状态。`;
+}
+
+function notBannedText(subscriber) {
+    return `${subscriberLabel(subscriber)} 不在黑名单中，无需解除。`;
+}
+
+function ambiguousSubscriberText(target) {
+    return `有多位用户用过用户名 ${escapeHtml(target)}，请改用用户ID（在 /users 里点击复制）。`;
+}
+
+function subscriberNotFoundText(target) {
+    return `未找到用户 ${escapeHtml(target)}。用户ID可在 /users 里点击复制；按用户名查找需对方设置过 Telegram 用户名。`;
+}
+
 function removeChoicesMarkup(targets) {
     const inlineKeyboard = targets.map(target => [{
         text: `删除 ${target.symbol} ${target.name}`,
@@ -205,13 +238,18 @@ module.exports = {
     addPromptMarkup,
     addedText,
     alreadyTrackedText,
+    ambiguousSubscriberText,
+    bannedText,
     confirmRemoveMarkup,
     confirmRemoveText,
     fundFlowToggledText,
     longhuToggledText,
     removeChoicesMarkup,
     removeKeyboardMarkup,
+    notBannedText,
     removedText,
+    subscriberNotFoundText,
+    unbannedText,
     usersMessages,
     watchlistFullText,
     watchlistText

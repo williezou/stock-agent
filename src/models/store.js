@@ -27,6 +27,13 @@ function createStore({ connectionString = config.databaseUrl } = {}) {
         return changed;
     }
 
+    // 拉黑时一并清掉未完成的对话状态
+    async function setSubscriberBanned(chatId, banned) {
+        const subscriber = await subscribers.setSubscriberBanned(chatId, banned);
+        if (subscriber && banned) await sessions.clearSession(chatId);
+        return subscriber;
+    }
+
     // 确保管理员存在（不覆盖其/stop状态）、播种默认自选股，并迁移旧任务记录
     async function bootstrapAdmin(chatId, defaultTargets) {
         await subscribers.ensureSubscriber(chatId);
@@ -43,7 +50,8 @@ function createStore({ connectionString = config.databaseUrl } = {}) {
         bootstrapAdmin,
         close: () => pool.end(),
         deactivateSubscriber,
-        initialize
+        initialize,
+        setSubscriberBanned
     };
 }
 

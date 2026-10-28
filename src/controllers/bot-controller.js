@@ -104,6 +104,29 @@ function createBotController({
         return reply(chatId, MESSAGES.registered);
     }
 
+    // /ban、/unban：参数为用户ID（chat_id）或@用户名；用户名对应多条记录时要求改用用户ID，避免拉黑错人
+    async function findSubscribers(target) {
+        if (/^-?\d+$/.test(target)) {
+            const subscriber = await store.getSubscriber(target);
+            return subscriber ? [subscriber] : [];
+        }
+        return store.findSubscribersByUsername(target);
+    }
+
+    async function setBanned(chatId, argument, banned) {
+        const target = argument.trim();
+        if (!target) return reply(chatId, banned ? MESSAGES.banUsage : MESSAGES.unbanUsage);
+        const matches = await findSubscribers(target);
+        if (!matches.length) return reply(chatId, view.subscriberNotFoundText(target));
+        if (matches.length > 1) return reply(chatId, view.ambiguousSubscriberText(target));
+        const [subscriber] = matches;
+        if (banned && isAdmin(subscriber.chat_id)) return reply(chatId, MESSAGES.cannotBanAdmin);
+        if (!banned && subscriber.status !== "banned") return reply(chatId, view.notBannedText(subscriber));
+        const updated = await store.setSubscriberBanned(subscriber.chat_id, banned);
+        if (!updated) return reply(chatId, view.notBannedText(subscriber));
+        return reply(chatId, banned ? view.bannedText(updated) : view.unbannedText(updated));
+    }
+
     async function showUsers(chatId) {
         for (const text of view.usersMessages(await store.listSubscriberSummaries(), maxSubscribers)) {
             await reply(chatId, text);
@@ -214,6 +237,9 @@ function createBotController({
         const text = String(message.text || "").trim();
         // 群聊静默忽略，避免繁忙群组耗尽共享的Telegram限流额度
         if (!isPrivateChat(message.chat)) return;
+        const subscriber = await store.getSubscriber(chatId);
+        // 被管理员拉黑的用户：任何消息（包括 /start 重新注册）都不回复
+        if (subscriber?.status === "banned" && !isAdmin(chatId)) return;
 
         const startArgument = commandArgument(text, "start");
         const seatQuery = startArgument && parseLonghuStartPayload(startArgument);
@@ -226,8 +252,13 @@ function createBotController({
         }
         if (startArgument !== null) return register(message, startArgument.trim());
         // 管理员命令不受本人订阅状态影响（管理员 /stop 后也能查看）
-        if (isAdmin(chatId) && isCommand(text, "users")) return showUsers(chatId);
-        const subscriber = await store.getSubscriber(chatId);
+        if (isAdmin(chatId)) {
+            if (isCommand(text, "users")) return showUsers(chatId);
+            const banArgument = commandArgument(text, "ban");
+            if (banArgument !== null) return setBanned(chatId, banArgument, true);
+            const unbanArgument = commandArgument(text, "unban");
+            if (unbanArgument !== null) return setBanned(chatId, unbanArgument, false);
+        }
         if (subscriber?.status !== "active") {
             // 陌生人的闲聊不回复；已停用（或屏蔽后又解除）的用户仍给出恢复提示
             if (!subscriber && !text.startsWith("/")) return;

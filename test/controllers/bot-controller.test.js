@@ -54,9 +54,19 @@ function createMemoryStore(initial = [], registered = true) {
             subscriber.fund_flow_enabled = enabled;
             return true;
         },
+        async setSubscriberBanned(chatId, banned) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber || (!banned && subscriber.status !== "banned")) return null;
+            subscriber.status = banned ? "banned" : "active";
+            return subscriber;
+        },
+        async findSubscribersByUsername(username) {
+            const name = String(username).replace(/^@/, "").toLowerCase();
+            return [...subscribers.values()].filter(subscriber => String(subscriber.username || "").toLowerCase() === name).slice(0, 2);
+        },
         async deactivateSubscriber(chatId) {
             const subscriber = subscribers.get(String(chatId));
-            if (!subscriber) return false;
+            if (!subscriber || subscriber.status === "banned") return false;
             subscriber.status = "inactive";
             sessions.delete(String(chatId));
             return true;
@@ -257,14 +267,63 @@ test("/users 只对管理员生效：列出启用/停用人数、自选股数量
 
     await controller.handleUpdate(privateMessage("/users"));
     const text = sent.at(-1).text;
-    assert.match(text, /订阅用户：启用 1\/\d+，停用 2/);
+    assert.match(text, /订阅用户：启用 1\/\d+，停用 2，拉黑 0/);
     assert.match(text, /开启龙虎榜 0 人，开启资金异动 1 人/);
     assert.match(text, /自选股汇总（2只，按关注人数）<\/b>\n中际旭创 300308 · 1人\n贵州茅台 600519 · 1人/, "汇总只算启用用户（停用的管理员也关注了茅台）");
-    assert.match(text, /1\. A&lt;b&gt;（@friend）\n　自选2只 · 龙虎榜关 · 2026-10-28\n　贵州茅台、中际旭创/);
-    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 100\n　自选1只 · 2026-10-28\n　贵州茅台/);
+    assert.match(text, /1\. A&lt;b&gt;（@friend） <code>300<\/code>\n　自选2只 · 龙虎榜关 · 2026-10-28\n　贵州茅台、中际旭创/);
+    assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 100 <code>100<\/code>\n　自选1只 · 2026-10-28\n　贵州茅台/);
 
     await controller.handleUpdate(privateMessage("/users", 300, 300));
     assert.doesNotMatch(sent.at(-1).text, /订阅用户/, "非管理员不能查看");
+});
+
+test("/ban、/unban：管理员按用户ID或@用户名拉黑；被拉黑的用户消息一律不回复、/start 也不能重新启用", async () => {
+    const { controller, sent, store } = setup([], { adminChatId: "100" });
+    await store.registerSubscriber({ chatId: 300, username: "Friend", firstName: "小明" });
+
+    await controller.handleUpdate(privateMessage("/ban"));
+    assert.match(sent.at(-1).text, /用法/);
+    await controller.handleUpdate(privateMessage("/ban 999"));
+    assert.match(sent.at(-1).text, /未找到用户 999/);
+    await controller.handleUpdate(privateMessage("/ban 100"));
+    assert.match(sent.at(-1).text, /不能拉黑管理员/);
+
+    await controller.handleUpdate(privateMessage("/ban @friend"));
+    assert.match(sent.at(-1).text, /🚫 已拉黑 小明（@Friend） <code>300<\/code>/);
+    assert.equal((await store.getSubscriber(300)).status, "banned");
+
+    const before = sent.length;
+    await controller.handleUpdate(privateMessage("/list", 300, 300));
+    await controller.handleUpdate(privateMessage("/start", 300, 300));
+    await controller.handleUpdate(privateMessage("你好", 300, 300));
+    assert.equal(sent.length, before, "被拉黑后不回复任何消息");
+    assert.equal((await store.getSubscriber(300)).status, "banned", "/start 不能解除拉黑");
+    assert.equal(await store.deactivateSubscriber(300), false, "屏蔽机器人等停用操作不会覆盖拉黑状态");
+
+    await controller.handleUpdate(privateMessage("/users"));
+    assert.match(sent.at(-1).text, /拉黑 1[\s\S]*已拉黑（\/unban 用户ID 解除）<\/b>\n1\. 小明/);
+
+    await controller.handleUpdate(privateMessage("/unban 300"));
+    assert.match(sent.at(-1).text, /✅ 已解除拉黑 小明/);
+    assert.equal((await store.getSubscriber(300)).status, "active");
+
+    await controller.handleUpdate(privateMessage("/unban 300"));
+    assert.match(sent.at(-1).text, /不在黑名单中/, "已启用的用户再次解除时只提示");
+
+    await store.registerSubscriber({ chatId: 500, firstName: "停用的人" });
+    await store.deactivateSubscriber(500);
+    await controller.handleUpdate(privateMessage("/unban 500"));
+    assert.match(sent.at(-1).text, /不在黑名单中/);
+    assert.equal((await store.getSubscriber(500)).status, "inactive", "不会把自己 /stop 的用户重新启用");
+
+    await store.registerSubscriber({ chatId: 600, username: "friend", firstName: "同名" });
+    await controller.handleUpdate(privateMessage("/ban @FRIEND"));
+    assert.match(sent.at(-1).text, /有多位用户用过用户名 @FRIEND，请改用用户ID/);
+    assert.equal((await store.getSubscriber(600)).status, "active");
+
+    await controller.handleUpdate(privateMessage("/ban 100", 300, 300));
+    assert.equal((await store.getSubscriber(100)).status, "active", "非管理员发 /ban 无效");
+    assert.doesNotMatch(sent.at(-1).text, /拉黑/);
 });
 
 test("/users 人数多时自动拆成多条消息，每条都在Telegram长度上限内", () => {
@@ -277,6 +336,7 @@ test("/users 人数多时自动拆成多条消息，每条都在Telegram长度�
     const messages = usersMessages(users, 50);
     assert.ok(messages.length > 1);
     assert.ok(messages.every(text => visibleLength(text) <= 4096));
+    assert.ok(messages.every(text => (text.match(/<(b|i|code)>/g) || []).length <= 100), "每条消息的格式实体不超过100个");
     assert.equal(messages.join("\n").match(/^\d+\. 用户/gm).length, 80, "不丢人");
 });
 
