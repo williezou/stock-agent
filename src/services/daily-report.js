@@ -3,12 +3,13 @@ const { createRateLimiter, runPool } = require("../lib/async");
 const { createHttpClient, formatError, requestWithRetry } = require("../lib/http");
 const { createMarketService, healthDelta } = require("../models/market/market-data");
 const { createNewsService } = require("../models/market/news");
+const { createStockEventService } = require("../models/market/stock-events");
 const { getChinaClock, isAfterChinaClose } = require("../models/market/trading-calendar");
 const { DEFAULT_TARGETS } = require("../models/stock");
 const { createStore } = require("../models/store");
 const { analyzeKlines, buildTradePlan } = require("./technical-analysis");
 
-// 每日收盘报告：拉取自选股日K → 技术分析与交易计划 → 附上新闻公告
+// 每日收盘报告：拉取自选股日K → 技术分析与交易计划 → 附上新闻公告与自选股事件（解禁、财报披露、业绩预告、增减持、大宗交易、融资）
 const KLINE_DAYS = 140;
 const KLINE_CONCURRENCY = 3;
 const KLINE_REQUEST_GAP_MS = 200;
@@ -21,7 +22,8 @@ function getSharedServices() {
         const httpClient = createHttpClient();
         sharedServices = {
             marketService: createMarketService({ httpClient, requestWithRetry }),
-            newsService: createNewsService({ httpClient, requestWithRetry })
+            newsService: createNewsService({ httpClient, requestWithRetry }),
+            eventService: createStockEventService({ httpClient, requestWithRetry })
         };
     }
     return sharedServices;
@@ -149,9 +151,18 @@ async function loadAdminTargets() {
     }
 }
 
-// 由日K与新闻公告生成每只股票的报告（技术分析 + 交易计划）
-async function composeReports(newsService, targets, klineSets, date) {
-    const contextItems = await getContextItems(newsService, targets);
+// 一批股票的事件只查一次；查询失败时报告照常生成，只是没有事件
+async function getEvents(eventService, targets, date) {
+    if (!eventService) return new Map();
+    return eventService.getEvents(targets.map(target => target.symbol), date).catch(error => {
+        console.error(`⚠️ 自选股事件获取失败：${formatError(error)}`);
+        return new Map();
+    });
+}
+
+// 由日K、新闻公告与事件生成每只股票的报告（技术分析 + 交易计划）
+async function composeReports({ newsService, eventService }, targets, klineSets, date) {
+    const [contextItems, events] = await Promise.all([getContextItems(newsService, targets), getEvents(eventService, targets, date)]);
     return targets.map((meta, index) => {
         const rows = klineSets[index].filter(item => item.date <= date);
         const analysis = analyzeKlines(rows);
@@ -164,7 +175,8 @@ async function composeReports(newsService, targets, klineSets, date) {
             analysis,
             plan: buildTradePlan(analysis),
             news: contextItems[index].news,
-            announcements: contextItems[index].announcements
+            announcements: contextItems[index].announcements,
+            events: events.get(meta.symbol) || []
         };
     });
 }
@@ -191,7 +203,7 @@ async function saveReports(reportCache, dateStr, reports) {
 // allowPartial：多用户调度使用，部分股票日K未就绪时仍为其余股票生成报告，并在unavailable中列出缺失项。
 // reportCache：当日已存的报告直接复用，只为尚未生成的股票拉取数据
 async function buildReports({ dryRun = false, now = new Date(), targets, allowPartial = false, klineCache, reportCache } = {}) {
-    const { marketService, newsService } = getSharedServices();
+    const { marketService, newsService, eventService } = getSharedServices();
     const healthBefore = marketService.health();
     const dataHealth = () => healthDelta(healthBefore, marketService.health());
 
@@ -228,7 +240,7 @@ async function buildReports({ dryRun = false, now = new Date(), targets, allowPa
                 ready.push({ target, rows: result.value });
             });
             if (ready.length) {
-                const reports = await composeReports(newsService, ready.map(item => item.target), ready.map(item => item.rows), dateStr);
+                const reports = await composeReports({ newsService, eventService }, ready.map(item => item.target), ready.map(item => item.rows), dateStr);
                 await saveReports(reportCache, dateStr, reports);
                 for (const report of reports) built.set(report.meta.symbol, report);
             }
@@ -255,7 +267,7 @@ async function buildReports({ dryRun = false, now = new Date(), targets, allowPa
     const klineSets = settled.map(result => result.value);
     const selection = selectReportDate(klineSets, { dryRun, now });
     if (!selection.date) return { skipped: true, reason: selection.reason, date: null, reports: [] };
-    const reports = await composeReports(newsService, activeTargets, klineSets, selection.date);
+    const reports = await composeReports({ newsService, eventService }, activeTargets, klineSets, selection.date);
     return { skipped: false, reason: "", date: selection.date, reports, unavailable: [], dataHealth: dataHealth() };
 }
 

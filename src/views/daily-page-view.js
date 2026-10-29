@@ -3,6 +3,7 @@ const { deltaText, signedAmount } = require("./fund-flow-view");
 const { formatHotMoneyText, seatLabel } = require("./hot-money-view");
 const { NOTE: LIMIT_UP_NOTE, countsText, industriesText, summarizeLimitUp, yesterdayText } = require("./limit-up-view");
 const { formatLonghuMessage } = require("./longhu-view");
+const { eventsLine } = require("./stock-events-view");
 const { StockLink } = require("./stock-link");
 
 // 每日总结网页：一个入口页（按用户的推送开关列出各段）+ 各段的HTML片段（各任务完成时分别写入，入口页打开时加载）。
@@ -39,6 +40,7 @@ tr.sub td { text-align: left; white-space: normal; color: var(--muted); font-siz
 .price { font-size: 18px; font-weight: 600; white-space: nowrap; }
 .plan { margin: 4px 0 8px; }
 .meta { color: var(--muted); font-size: 14px; }
+.event { font-size: 14px; color: #b45309; margin: 2px 0; }
 details { margin-top: 6px; }
 summary { color: var(--accent); cursor: pointer; font-size: 14px; }
 details .tg { margin-top: 6px; font-size: 14px; }
@@ -109,7 +111,7 @@ function withoutNotes(text) {
 }
 
 // 个股卡片：名称与涨跌、交易计划、K线图、支撑压力与量能、最新催化；技术指标收在“详情”里
-function stockCard({ meta, analysis, plan, news = [], announcements = [] }, chartUrl, app) {
+function stockCard({ meta, analysis, plan, news = [], announcements = [], events = [] }, chartUrl, app) {
     const { latest, ma, macd, rsi, kdj, bollinger } = analysis;
     const catalyst = [...announcements, ...news].find(item => item && item.title);
     const indicators = [
@@ -126,6 +128,7 @@ function stockCard({ meta, analysis, plan, news = [], announcements = [] }, char
         + `<div class="plan"><b>${escapeHtml(plan.recommendation)}</b>｜回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}｜止损 ${number(plan.stop)}｜目标 ${number(plan.target)}</div>`
         + chartImage(chartUrl, `${meta.name} K线`)
         + `<div class="meta">支撑 ${number(analysis.support)}｜压力 ${number(analysis.resistance)}｜成交 ${money(latest.amount)}｜量比 ${number(analysis.volumeRatio)}x</div>`
+        + (events.length ? `<div class="event">${eventsLine(events)}</div>` : "")
         + (catalyst ? `<div class="meta">📰 ${linkLine(catalyst)}</div>` : "")
         + `<details><summary>技术指标</summary><div class="tg">${indicators.join("\n")}</div></details>`
         + "</div>";
@@ -252,9 +255,10 @@ function dailyPageButton(url) {
 
 // 收盘推送：概况（每只一行）+ 按钮，明细在网页里
 function closeMessage({ reports, date, app }) {
-    const rows = reports.map(({ meta, analysis, plan }) =>
-        `${StockLink.of(meta, app).html({ bold: true, code: false })} ${number(analysis.latest.close)} ${signed(analysis.latest.changePct)}　<b>${escapeHtml(plan.recommendation)}</b>`);
-    return [`<b>📊 每日收盘总结｜${escapeHtml(date)}</b>`, ...rows, "<i>K线、技术指标、交易计划与盘中异动回顾见网页。</i>"].join("\n");
+    // 有事件（解禁、财报披露等）的股票标 ⚠️，明细在网页里
+    const rows = reports.map(({ meta, analysis, plan, events = [] }) =>
+        `${StockLink.of(meta, app).html({ bold: true, code: false })} ${number(analysis.latest.close)} ${signed(analysis.latest.changePct)}　<b>${escapeHtml(plan.recommendation)}</b>${events.length ? " ⚠️" : ""}`);
+    return [`<b>📊 每日收盘总结｜${escapeHtml(date)}</b>`, ...rows, "<i>K线、技术指标、交易计划、⚠️事件与盘中异动回顾见网页。</i>"].join("\n");
 }
 
 // 龙虎榜与游资动向写入网页后的推送：游资要点 + 按钮

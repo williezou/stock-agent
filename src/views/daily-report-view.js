@@ -1,6 +1,7 @@
 const { PHOTO_CAPTION_LIMIT } = require("../constants");
 const { visibleLength } = require("../lib/telegram-text");
 const { escapeHtml, linkLine, money, number, shortText, signed } = require("./format");
+const { eventsLine } = require("./stock-events-view");
 const { StockLink, stockLinkLegend } = require("./stock-link");
 
 // 每日收盘报告的展示：总览图说明（每页两只股票）与个股图说明
@@ -12,8 +13,9 @@ const STOCK_FOCUS = {
 };
 
 function formatStockCaption(report, date, app) {
-    const { meta, analysis, plan, news = [], announcements = [] } = report;
+    const { meta, analysis, plan, news = [], announcements = [], events = [] } = report;
     const { latest, ma, macd, rsi, kdj, bollinger } = analysis;
+    const eventLine = eventsLine(events);
     const catalyst = [...announcements, ...news].find(item => item && item.title);
     const catalystLine = catalyst
         ? `📰 ${linkLine(catalyst)}`
@@ -34,17 +36,21 @@ function formatStockCaption(report, date, app) {
         `🧭 支撑 ${number(analysis.support)}｜压力 ${number(analysis.resistance)}｜20日量价均价 ${number(analysis.weightedClose20)}`,
         `🎯 <b>${plan.recommendation}</b>｜回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}`,
         `🛡 止损 ${number(plan.stop)}｜15%目标 ${number(plan.target)}｜盈亏比 ${number(plan.rewardRisk)}:1`,
-        `🔎 ${focus}；筹码/机构成本不可可靠验证；跳空可能令实际亏损超过8%。`,
-        catalystLine,
-        sourceLine
+        `🔎 ${focus}；筹码/机构成本不可可靠验证；跳空可能令实际亏损超过8%。`
     ];
-    // 超长链接会撑爆1024字符限制：依次降级为纯文本标题、去掉行情链接，而不是让整次推送失败
-    let caption = lines.join("\n");
-    // 按Telegram的口径计算可见文字长度（链接地址不计），正常情况下链接都能保留
-    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) caption = [...lines.slice(0, -2), plainCatalystLine, sourceLine].join("\n");
-    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) caption = [...lines.slice(0, -2), plainCatalystLine].join("\n");
-    if (visibleLength(caption) > PHOTO_CAPTION_LIMIT) throw new Error("Telegram图片说明超过1024字符限制");
-    return caption;
+    // 超长会撑爆1024字符限制：依次降级为纯文本标题、去掉行情链接说明、去掉事件行，而不是让整次推送失败
+    // （按Telegram的口径计算可见文字长度，链接地址不计，正常情况下都能保留）
+    const attempts = [
+        [eventLine, catalystLine, sourceLine],
+        [eventLine, plainCatalystLine, sourceLine],
+        [eventLine, plainCatalystLine],
+        [plainCatalystLine]
+    ];
+    for (const tail of attempts) {
+        const caption = [...lines, ...tail.filter(Boolean)].join("\n");
+        if (visibleLength(caption) <= PHOTO_CAPTION_LIMIT) return caption;
+    }
+    throw new Error("Telegram图片说明超过1024字符限制");
 }
 
 function formatOverviewRow(report, app) {
