@@ -16,6 +16,8 @@ const SCHEMA = [
     "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS longhu_enabled BOOLEAN NOT NULL DEFAULT TRUE",
     // 盘中资金异动提醒（默认开启）
     "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS fund_flow_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    // 盘中量价异动提醒（默认开启）
+    "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS volume_spike_enabled BOOLEAN NOT NULL DEFAULT TRUE",
     `CREATE TABLE IF NOT EXISTS watchlist (
         chat_id TEXT NOT NULL,
         symbol VARCHAR(6) NOT NULL,

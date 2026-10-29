@@ -7,7 +7,7 @@ const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
 function sourceNote(source = "东方财富") {
     return `主力净流入为${source}按大单估算的数据，非交易所官方口径；仅供参考，不构成投资建议。`;
 }
-const OPT_OUT_NOTE = "发送 /flow off 可关闭盘中异动提醒。";
+const OPT_OUT_NOTE = "发送 /flow off 可关闭资金异动提醒。";
 
 // 金额紧凑写法：+8.75亿 / -7951万
 function signedAmount(value) {

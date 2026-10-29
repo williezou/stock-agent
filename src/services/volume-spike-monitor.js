@@ -4,8 +4,9 @@ const { alertAdmin } = require("./admin-alert");
 const { FundFlowMonitor } = require("./fund-flow-monitor");
 
 // 量价异动监控：某个时间段内每分钟取一次全市场快照，与 lookbackMinutes 分钟前的快照比较，
-// 这段时间的成交额 ≥ minAmount 且涨跌幅变化 ≥ minChangePct（个百分点）即为急涨/急跌放量，同一方向每天只推一次。
-// 快照只保存在内存中（重启后等满回看时长再开始比较）；已推送的股票存库，重启后不重复推送
+// 这段时间的成交额 ≥ minAmount 且涨跌幅变化 ≥ minChangePct（个百分点）即为急涨/急跌放量。
+// 发现的股票先攒着，每 pushMinutes 分钟（从时间段开始对齐，时间段结束时也推一次）汇总推送，同一方向每天只推一次。
+// 快照只保存在内存中（重启后等满回看时长再开始比较）；已推送与待推送的股票存库，重启后不重复、不漏推
 const FETCH_FAILURE_ALERT = 3;
 
 function formatMinutes(minutes) {
@@ -29,19 +30,20 @@ function detectSpikes(previous, current, { minAmount, minChangePct }) {
 }
 
 class VolumeSpikeMonitor {
-    constructor({ label, start, end, lookbackMinutes = 5, minAmount = 5e7, minChangePct = 2, maxPerSide = 8 }) {
+    constructor({ label, start, end, lookbackMinutes = 5, pushMinutes = 15, minAmount = 5e7, minChangePct = 2, maxPerSide = 8 }) {
         this.label = label;
         this.start = FundFlowMonitor.parseTime(start);
         this.end = FundFlowMonitor.parseTime(end);
         if (!label || this.start >= this.end) throw new Error(`量价异动时间段无效：${label}@${start}-${end}`);
         this.lookbackMinutes = lookbackMinutes;
+        this.pushMinutes = pushMinutes;
         this.thresholds = { minAmount, minChangePct };
         this.maxPerSide = maxPerSide;
         this.state = VolumeSpikeMonitor.newState();
     }
 
     static newState(date = "") {
-        return { date, lastMinute: null, snapshots: new Map(), alerted: new Set(), failures: 0, trading: null };
+        return { date, lastMinute: null, snapshots: new Map(), alerted: new Set(), pending: new Map(), pushSlot: null, failures: 0, trading: null };
     }
 
     // 存库与资金异动共用表，以“量价:时间段”区分
@@ -60,12 +62,14 @@ class VolumeSpikeMonitor {
             console.error(`⚠️ 读取${this.label}量价异动状态失败：${formatError(error)}`);
             return null;
         });
-        if (saved) this.state.alerted = new Set(saved.alerted || []);
+        if (!saved) return;
+        this.state.alerted = new Set(saved.alerted || []);
+        this.state.pending = new Map(saved.pending || []);
     }
 
     async persist(deps) {
         if (!deps.saveState) return;
-        await deps.saveState(this.state.date, this.storageLabel, { alerted: [...this.state.alerted] })
+        await deps.saveState(this.state.date, this.storageLabel, { alerted: [...this.state.alerted], pending: [...this.state.pending] })
             .catch(error => console.error(`⚠️ 保存${this.label}量价异动状态失败：${formatError(error)}`));
     }
 
@@ -76,6 +80,27 @@ class VolumeSpikeMonitor {
             if (this.state.snapshots.has(m)) return { minute: m, rows: this.state.snapshots.get(m) };
         }
         return null;
+    }
+
+    // 推送时点：从时间段开始每 pushMinutes 分钟一个，返回所在时点的序号
+    pushSlot(minute) {
+        return Math.floor((minute - this.start) / this.pushMinutes);
+    }
+
+    // 新发现的股票攒进待推送；汇总期内同一只股票多次触发时保留变化最大的一次
+    collect(spikes, minute, previousMinute) {
+        let added = false;
+        for (const [side, rows] of [["up", spikes.up], ["down", spikes.down]]) {
+            for (const row of rows) {
+                const key = `${side}:${row.symbol}`;
+                if (this.state.alerted.has(key)) continue;
+                const held = this.state.pending.get(key);
+                if (held && Math.abs(held.windowChange) >= Math.abs(row.windowChange)) continue;
+                this.state.pending.set(key, { ...row, time: formatMinutes(minute), minutes: minute - previousMinute });
+                added = true;
+            }
+        }
+        return added;
     }
 
     // deps：snapshot（getSnapshot）、isTradingDay、listSubscribers、listWatchSymbols、prepare、isBotBlocked、
@@ -90,6 +115,8 @@ class VolumeSpikeMonitor {
         const minute = minutesOfDay(now);
         if (minute === this.state.lastMinute) return { action: "waiting" };
         this.state.lastMinute = minute;
+        // 当天第一次运行（含重启）以所在时点为起点，不立即补推
+        if (this.state.pushSlot === null) this.state.pushSlot = this.pushSlot(minute);
 
         const subscribers = await deps.listSubscribers();
         if (!subscribers.length) return { action: "not-due" };
@@ -119,24 +146,40 @@ class VolumeSpikeMonitor {
         for (const kept of this.state.snapshots.keys()) {
             if (kept < minute - this.lookbackMinutes - 3) this.state.snapshots.delete(kept);
         }
+        // 回看快照不够时只收集，但已攒下的照常按时点推送
         const previous = this.lookbackSnapshot(minute);
-        if (!previous) return { action: "waiting", collecting: this.state.snapshots.size };
+        const added = previous ? this.collect(detectSpikes(previous.rows, snapshot.rows, this.thresholds), minute, previous.minute) : false;
+        const slot = this.pushSlot(minute);
+        const due = slot > this.state.pushSlot || minute >= this.end;
+        const sinceMinute = this.start + this.state.pushSlot * this.pushMinutes;
+        // 到了时点即使没有可推的也算过了这个时点，之后发现的等下一个时点
+        if (due) this.state.pushSlot = slot;
+        if (!due || !this.state.pending.size) {
+            if (added) await this.persist(deps);
+            return { action: "waiting", pending: this.state.pending.size };
+        }
 
-        const spikes = detectSpikes(previous.rows, snapshot.rows, this.thresholds);
-        const fresh = (rows, side) => rows.filter(row => !this.state.alerted.has(`${side}:${row.symbol}`)).slice(0, this.maxPerSide);
-        const up = fresh(spikes.up, "up");
-        const down = fresh(spikes.down, "down");
-        if (!up.length && !down.length) return { action: "waiting" };
+        // 每个方向按变化幅度取前 maxPerSide 只推送；没排上的不记为已推送，之后再触发还能推
+        const pending = [...this.state.pending.entries()];
+        const pick = side => pending.filter(([key]) => key.startsWith(`${side}:`)).map(([, row]) => row)
+            .sort((a, b) => Math.abs(b.windowChange) - Math.abs(a.windowChange));
+        const allUp = pick("up");
+        const allDown = pick("down");
+        const up = allUp.slice(0, this.maxPerSide);
+        const down = allDown.slice(0, this.maxPerSide);
         up.forEach(row => this.state.alerted.add(`up:${row.symbol}`));
         down.forEach(row => this.state.alerted.add(`down:${row.symbol}`));
+        this.state.pending.clear();
         await this.persist(deps);
 
         const content = {
             label: this.label,
             time: formatMinutes(minute),
-            since: formatMinutes(previous.minute),
-            minutes: minute - previous.minute,
+            since: formatMinutes(sinceMinute),
+            lookbackMinutes: this.lookbackMinutes,
             sources: snapshot.sources,
+            upTotal: allUp.length,
+            downTotal: allDown.length,
             up,
             down
         };

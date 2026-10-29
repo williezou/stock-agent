@@ -208,6 +208,14 @@ function createBotController({
         return reply(chatId, view.fundFlowToggledText(enabled));
     }
 
+    // /spike 切换，/spike on|off 显式设置
+    async function setVolumeSpikePush(chatId, argument, subscriber) {
+        const enabled = parseToggle(argument, subscriber.volume_spike_enabled);
+        if (enabled === null) return reply(chatId, MESSAGES.invalidSpikeArgument);
+        await store.setVolumeSpikeEnabled(chatId, enabled);
+        return reply(chatId, view.volumeSpikeToggledText(enabled));
+    }
+
     // 龙虎榜推送里点击股票名称（t.me 深层链接）后，回复该股当日的买卖席位明细
     // 同一会话对同一只股票同一天的席位：生成中或冷却期内不重复发送。
     // onAccepted / onBlocked 在开始处理前调用（按钮点击需立即应答，避免生成期间按钮一直转圈引发重按）
@@ -298,6 +306,8 @@ function createBotController({
         if (longhuArgument !== null) return setLonghuPush(chatId, longhuArgument, subscriber);
         const flowArgument = commandArgument(text, "flow");
         if (flowArgument !== null) return setFundFlowPush(chatId, flowArgument, subscriber);
+        const spikeArgument = commandArgument(text, "spike");
+        if (spikeArgument !== null) return setVolumeSpikePush(chatId, spikeArgument, subscriber);
 
         const addArgument = commandArgument(text, "add");
         if (addArgument !== null) return addArgument ? addStock(chatId, addArgument) : promptAdd(chatId);

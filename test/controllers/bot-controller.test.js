@@ -56,6 +56,12 @@ function createMemoryStore(initial = [], registered = true) {
             subscriber.fund_flow_enabled = enabled;
             return true;
         },
+        async setVolumeSpikeEnabled(chatId, enabled) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.volume_spike_enabled = enabled;
+            return true;
+        },
         async updateSubscriberProfile(chatId, { username, firstName }) {
             const subscriber = subscribers.get(String(chatId));
             profileUpdates.push(String(chatId));
@@ -255,12 +261,25 @@ test("/flow 切换资金异动提醒，并支持 on/off 显式设置", async () 
     const { controller, sent, store } = setup();
     await controller.handleUpdate(privateMessage("/flow"));
     assert.equal((await store.getSubscriber(100)).fund_flow_enabled, false, "默认开启，首次切换为关闭");
-    assert.match(sent.at(-1).text, /已关闭盘中异动提醒/);
+    assert.match(sent.at(-1).text, /已关闭资金异动提醒/);
     await controller.handleUpdate(privateMessage("/flow 开启"));
     assert.equal((await store.getSubscriber(100)).fund_flow_enabled, true);
-    assert.match(sent.at(-1).text, /已开启盘中异动提醒/);
+    assert.match(sent.at(-1).text, /已开启资金异动提醒/);
     await controller.handleUpdate(privateMessage("/flow maybe"));
     assert.match(sent.at(-1).text, /用法/);
+});
+
+test("/spike 单独切换量价异动提醒，不影响资金异动", async () => {
+    const { controller, sent, store } = setup();
+    await controller.handleUpdate(privateMessage("/spike"));
+    assert.equal((await store.getSubscriber(100)).volume_spike_enabled, false, "默认开启，首次切换为关闭");
+    assert.equal((await store.getSubscriber(100)).fund_flow_enabled, undefined);
+    assert.match(sent.at(-1).text, /已关闭量价异动提醒/);
+    await controller.handleUpdate(privateMessage("/spike on"));
+    assert.equal((await store.getSubscriber(100)).volume_spike_enabled, true);
+    assert.match(sent.at(-1).text, /已开启量价异动提醒/);
+    await controller.handleUpdate(privateMessage("/spike maybe"));
+    assert.match(sent.at(-1).text, /\/spike on/);
 });
 
 test("/users 只对管理员生效：列出启用/停用人数、自选股数量与关闭的推送，管理员停用后也能查看", async () => {
@@ -269,6 +288,7 @@ test("/users 只对管理员生效：列出启用/停用人数、自选股数量
     await store.upsert(300, { symbol: "600519", name: "贵州茅台" });
     await store.upsert(300, { symbol: "300308", name: "中际旭创" });
     await store.setLonghuEnabled(300, false);
+    await store.setVolumeSpikeEnabled(300, false);
     await store.registerSubscriber({ chatId: 400, firstName: "Gone" });
     await store.deactivateSubscriber(400);
     await store.deactivateSubscriber(100);
@@ -276,9 +296,9 @@ test("/users 只对管理员生效：列出启用/停用人数、自选股数量
     await controller.handleUpdate(privateMessage("/users"));
     const text = sent.at(-1).text;
     assert.match(text, /订阅用户：启用 1\/\d+，停用 2，拉黑 0/);
-    assert.match(text, /开启龙虎榜 0 人，开启资金异动 1 人/);
+    assert.match(text, /开启龙虎榜 0 人，开启资金异动 1 人，开启量价异动 0 人/);
     assert.match(text, /自选股汇总（2只，按关注人数）<\/b>\n中际旭创 300308 · 1人\n贵州茅台 600519 · 1人/, "汇总只算启用用户（停用的管理员也关注了茅台）");
-    assert.match(text, /1\. A&lt;b&gt;（@friend） <code>300<\/code>\n　自选2只 · 龙虎榜关 · 2026-10-28\n　贵州茅台、中际旭创/);
+    assert.match(text, /1\. A&lt;b&gt;（@friend） <code>300<\/code>\n　自选2只 · 龙虎榜关 · 量价异动关 · 2026-10-28\n　贵州茅台、中际旭创/);
     assert.match(text, /<b>停用（\/stop 或屏蔽了机器人）<\/b>\n1\. 测试 <code>100<\/code>\n　自选1只 · 2026-10-28\n　贵州茅台/);
 
     await controller.handleUpdate(privateMessage("/users", 300, 300));

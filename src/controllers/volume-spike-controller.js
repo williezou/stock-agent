@@ -5,15 +5,14 @@ const { createMarketSnapshotService } = require("../models/market/market-snapsho
 const { isTradingDay } = require("../models/market/trading-calendar");
 const { FundFlowMonitor } = require("../services/fund-flow-monitor");
 const { VolumeSpikeMonitor } = require("../services/volume-spike-monitor");
-const { generateVolumeSpikeChart } = require("../views/charts/volume-spike-chart");
-const { formatVolumeSpikeAlert, formatVolumeSpikeCaption } = require("../views/volume-spike-view");
-const { prepareDelivery } = require("./fund-flow-controller");
+const { formatVolumeSpikeAlert } = require("../views/volume-spike-view");
 
-// 量价异动提醒控制器：按配置的时间段（VOLUME_SPIKE_WINDOWS）各建一个监控实例；接收者与资金异动相同（/flow 开启的用户）
+// 量价异动提醒控制器：按配置的时间段（VOLUME_SPIKE_WINDOWS）各建一个监控实例；接收者为 /spike 开启的用户
 function createVolumeSpikeMonitors(spikeConfig = config.volumeSpike) {
     return FundFlowMonitor.parseWindows(spikeConfig.windows).map(window => new VolumeSpikeMonitor({
         ...window,
         lookbackMinutes: spikeConfig.lookbackMinutes,
+        pushMinutes: spikeConfig.pushMinutes,
         minAmount: spikeConfig.minAmount,
         minChangePct: spikeConfig.minChangePct
     }));
@@ -37,20 +36,13 @@ async function runVolumeSpikeTick(store, now = new Date(), services = {}) {
     const active = monitors.filter(monitor => monitor.isActive(now));
     if (!active.length) return { action: "outside-window" };
     const sendMessage = services.sendMessage || telegram.sendMessage;
-    const senders = {
-        render: services.renderChart || generateVolumeSpikeChart,
-        sendPhoto: services.sendPhoto || telegram.sendPhoto,
-        sendMessage,
-        caption: formatVolumeSpikeCaption,
-        text: formatVolumeSpikeAlert,
-        filePrefix: "volume-spike"
-    };
     const deps = {
         snapshot,
         isTradingDay: checkTradingDay,
-        listSubscribers: () => store.listFundFlowSubscribers(),
+        listSubscribers: () => store.listVolumeSpikeSubscribers(),
         listWatchSymbols: async chatId => new Set((await store.list(chatId)).map(target => target.symbol)),
-        prepare: content => prepareDelivery(content, senders),
+        // 纯文字推送，按各自自选股标 ⭐
+        prepare: content => async (chatId, watchSymbols) => sendMessage(chatId, formatVolumeSpikeAlert({ ...content, watchSymbols })),
         isBotBlocked: telegram.isBotBlockedError,
         deactivateSubscriber: chatId => store.deactivateSubscriber(chatId),
         alertContext: {

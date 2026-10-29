@@ -11,7 +11,8 @@ const BOT_COMMANDS = [
     { command: "remove", description: "删除每日追踪股票" },
     { command: "list", description: "查看每日追踪列表" },
     { command: "longhu", description: "开启/关闭龙虎榜与游资动向推送" },
-    { command: "flow", description: "开启/关闭盘中异动提醒（资金、量价）" },
+    { command: "flow", description: "开启/关闭尾盘资金异动提醒" },
+    { command: "spike", description: "开启/关闭盘中量价异动提醒" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
 ];
@@ -30,7 +31,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭盘中异动提醒（资金异动、量价异动）";
+const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒";
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -60,6 +61,7 @@ const MESSAGES = {
     unbanUsage: "用法：<code>/unban 用户ID</code> 或 <code>/unban @用户名</code>。",
     cannotBanAdmin: "不能拉黑管理员本人。",
     invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
+    invalidSpikeArgument: "用法：<code>/spike</code> 切换，<code>/spike on</code> 开启，<code>/spike off</code> 关闭。",
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
@@ -88,7 +90,7 @@ function userBlock(user, index) {
     const name = user.first_name || user.username || user.chat_id;
     const handle = user.username ? `（@${user.username}）` : "";
     const watchlist = user.watchlist || [];
-    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关"].filter(Boolean);
+    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关", user.volume_spike_enabled === false && "量价异动关"].filter(Boolean);
     const lines = [
         `${index + 1}. ${escapeHtml(name)}${escapeHtml(handle)} <code>${escapeHtml(user.chat_id)}</code>`,
         `　${[`自选${watchlist.length}只`, ...off, user.created_date].join(" · ")}`
@@ -135,7 +137,7 @@ function usersMessages(users, maxSubscribers) {
     const inactive = users.filter(user => user.status !== "active" && user.status !== "banned");
     const blocks = [
         `<b>👥 订阅用户：启用 ${active.length}${maxSubscribers > 0 ? `/${maxSubscribers}` : ""}，停用 ${inactive.length}，拉黑 ${banned.length}</b>\n` +
-            `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人`
+            `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人，开启量价异动 ${active.filter(user => user.volume_spike_enabled !== false).length} 人`
     ];
     const summary = watchlistSummary(active);
     if (summary.length) {
@@ -178,8 +180,14 @@ function longhuToggledText(enabled) {
 
 function fundFlowToggledText(enabled) {
     return enabled
-        ? "✅ 已开启盘中异动提醒：交易日尾盘（默认14:30-15:00）主力资金明显加速流入/流出、盘中（默认9:30-11:30、13:00-14:57）几分钟内放量急涨急跌的股票会即时推送。发送 /flow off 可关闭。"
-        : "已关闭盘中异动提醒（资金异动、量价异动），其他推送不受影响。发送 /flow on 可重新开启。";
+        ? "✅ 已开启资金异动提醒：交易日尾盘（默认14:30-15:00）主力资金明显加速流入/流出的股票会即时推送。发送 /flow off 可关闭。"
+        : "已关闭资金异动提醒，其他推送不受影响。发送 /flow on 可重新开启。";
+}
+
+function volumeSpikeToggledText(enabled) {
+    return enabled
+        ? "✅ 已开启量价异动提醒：交易日盘中（默认9:30-11:30、13:00-14:57）几分钟内放量急涨急跌的股票每15分钟汇总推送一次。发送 /spike off 可关闭。"
+        : "已关闭量价异动提醒，其他推送不受影响。发送 /spike on 可重新开启。";
 }
 
 function subscriberLabel(subscriber) {
@@ -244,6 +252,7 @@ module.exports = {
     confirmRemoveText,
     fundFlowToggledText,
     longhuToggledText,
+    volumeSpikeToggledText,
     removeChoicesMarkup,
     removeKeyboardMarkup,
     notBannedText,

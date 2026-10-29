@@ -16,12 +16,12 @@ function validRows(rows) {
     return rows.filter(row => /^\d{6}$/.test(row.symbol) && row.price > 0 && Number.isFinite(row.changePct) && Number.isFinite(row.amount));
 }
 
-// 上交所：[代码, 名称, 最新价, 涨跌幅(%), 成交额(元)]；停牌股最新价为0
+// 上交所：[代码, 名称, 最新价, 涨跌幅(%), 成交额(元)]；停牌股最新价为0。名称去掉补齐用的空格（如“七 匹 狼”）
 function parseSseList(data) {
     const list = (data && Array.isArray(data.list)) ? data.list : [];
     return validRows(list.map(([symbol, name, price, changePct, amount]) => ({
         symbol: String(symbol),
-        name: String(name || "").trim(),
+        name: String(name || "").replace(/\s+/g, ""),
         price: Number(price),
         changePct: Number(changePct),
         amount: Number(amount)
@@ -35,7 +35,7 @@ function parseSinaList(data) {
     if (!Array.isArray(parsed)) throw new Error("新浪行情列表返回格式无法解析");
     return validRows(parsed.map(row => ({
         symbol: String(row.code || ""),
-        name: String(row.name || "").trim(),
+        name: String(row.name || "").replace(/\s+/g, ""),
         price: Number(row.trade),
         changePct: Number(row.changepercent),
         amount: Number(row.amount)
