@@ -6,21 +6,30 @@ const { generateStockChart } = require("../views/charts/stock-charts");
 const view = require("../views/daily-page-view");
 
 // 每日总结网页：每个用户每天一个入口页，地址里的令牌由 DAILY_PAGE_SECRET 按用户与日期生成（别人猜不到，同一天重复写入地址不变）。
-// 用户自己的内容（入口页、自选股收盘）放在 p/令牌/ 下；行情类内容所有用户共用，放在 s/日期/ 下，只写一次。
+// 用户自己的内容（入口页、自选股收盘）放在 p/令牌/ 下；行情类内容所有用户共用，放在 s/按日期生成的令牌/ 下，只写一次
+// （共用目录也用令牌，不拿到链接就猜不到任何文件地址，存储桶又禁止列目录，避免被人刷流量）。
 // 保留期由存储桶的生命周期规则控制（7天）
 const HTML = "text/html; charset=utf-8";
 const PNG = "image/png";
 // 图片写入后不再变化，可以长时间缓存
 const IMAGE_CACHE = "public, max-age=86400";
 
+function token(input) {
+    return crypto.createHmac("sha256", config.dailyPage.secret).update(input).digest("hex").slice(0, 32);
+}
+
 function pageToken(chatId, date) {
-    return crypto.createHmac("sha256", config.dailyPage.secret).update(`${chatId}:${date}`).digest("hex").slice(0, 32);
+    return token(`${chatId}:${date}`);
+}
+
+function sharedToken(date) {
+    return token(`shared:${date}`);
 }
 
 const paths = {
     index: (chatId, date) => `p/${pageToken(chatId, date)}/index.html`,
     close: (chatId, date) => `p/${pageToken(chatId, date)}/close.html`,
-    shared: (date, name) => `s/${date}/${name}`
+    shared: (date, name) => `s/${sharedToken(date)}/${name}`
 };
 
 function pageUrl(chatId, date) {
@@ -96,4 +105,4 @@ function resolveDailyPage(services = {}) {
     return config.dailyPage.enabled ? dailyPage : null;
 }
 
-module.exports = { dailyPage, pageToken, resolveDailyPage };
+module.exports = { dailyPage, pageToken, resolveDailyPage, sharedToken };

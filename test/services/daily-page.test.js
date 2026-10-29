@@ -13,7 +13,7 @@ delete process.env.DAILY_PAGE_BUCKET;
 
 const { config } = require("../../src/config");
 const { publicUrl } = require("../../src/gateways/page-storage");
-const { dailyPage, pageToken, resolveDailyPage } = require("../../src/services/daily-page");
+const { dailyPage, pageToken, resolveDailyPage, sharedToken } = require("../../src/services/daily-page");
 const view = require("../../src/views/daily-page-view");
 
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -67,28 +67,28 @@ test("入口页按推送开关列出各段：关掉的提醒不出现；页面�
     assert.match(html, /<meta name="robots" content="noindex, nofollow">/);
     assert.match(html, /<title>每日总结｜2026-10-28<\/title>/);
     assert.match(html, new RegExp(`data-src="http://pages.test/p/${token}/close.html"`));
-    assert.match(html, /data-src="http:\/\/pages.test\/s\/2026-10-28\/intraday.html"/, "量价异动开着，回顾仍在");
+    assert.match(html, /data-src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/intraday.html"/, "量价异动开着，回顾仍在");
     assert.doesNotMatch(html, /longhu\.html|hot-money\.html/, "龙虎榜关闭");
 
     await dailyPage.publishIndex({ chat_id: "200", fund_flow_enabled: false, volume_spike_enabled: false }, "2026-10-28");
     const other = read(`p/${pageToken("200", "2026-10-28")}/index.html`);
     assert.doesNotMatch(other, /intraday\.html/, "两种盘中提醒都关了");
-    assert.match(other, /s\/2026-10-28\/longhu\.html[^]*s\/2026-10-28\/hot-money\.html/);
+    assert.match(other, /s\/[0-9a-f]{32}\/longhu\.html[^]*s\/[0-9a-f]{32}\/hot-money\.html/);
 });
 
 test("自选股收盘：K线图所有用户共用、只写一次；图表生成失败时卡片只有文字", async () => {
     const reports = [report("300308", "中际旭创", { klines: 25 }), report("000001", "平安银行", { changePct: -2 })];
     const url = await dailyPage.publishClose({ chat_id: "100" }, { reports, date: "2026-10-27" });
     assert.match(url, /\/index\.html$/);
-    assert.ok(exists("s/2026-10-27/k-300308.png"));
-    assert.ok(!exists("s/2026-10-27/k-000001.png"), "不足20根K线画不了图");
+    assert.ok(exists(`s/${sharedToken("2026-10-27")}/k-300308.png`));
+    assert.ok(!exists(`s/${sharedToken("2026-10-27")}/k-000001.png`), "不足20根K线画不了图");
     const close = read(`p/${pageToken("100", "2026-10-27")}/close.html`);
-    assert.match(close, /<img src="http:\/\/pages.test\/s\/2026-10-27\/k-300308.png"/);
+    assert.match(close, /<img src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/k-300308.png"/);
     assert.equal((close.match(/<img /g) || []).length, 1);
 
-    fs.rmSync(path.join(dir, "s", "2026-10-27", "k-300308.png"));
+    fs.rmSync(path.join(dir, "s", sharedToken("2026-10-27"), "k-300308.png"));
     await dailyPage.publishClose({ chat_id: "200" }, { reports, date: "2026-10-27" });
-    assert.ok(!exists("s/2026-10-27/k-300308.png"), "同一天同一只股票不重复写图");
+    assert.ok(!exists(`s/${sharedToken("2026-10-27")}/k-300308.png`), "同一天同一只股票不重复写图");
     assert.match(read(`p/${pageToken("200", "2026-10-27")}/close.html`), /k-300308\.png/, "仍引用已写入的图");
 });
 
@@ -150,9 +150,9 @@ test("推送消息：收盘为每只一行概况，龙虎榜更新附游资要�
 test("龙虎榜与游资写入共用目录：图表失败时只写明细", async () => {
     const board = [{ symbol: "600000", name: "沪股", changePct: 10, netAmount: 1e8, reason: "涨幅偏离" }];
     await dailyPage.publishLonghu({ date: "2026-10-26", board, botUsername: "bot", render: () => Buffer.from("png") });
-    assert.match(read("s/2026-10-26/longhu.html"), /<img src="http:\/\/pages.test\/s\/2026-10-26\/longhu.png"/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/longhu.html`), /<img src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/longhu.png"/);
     await dailyPage.publishHotMoney({ date: "2026-10-26", content: { date: "2026-10-26", totalSeats: 0, seats: [], highWinSeats: [] }, render: () => { throw new Error("不应画图"); } });
-    assert.doesNotMatch(read("s/2026-10-26/hot-money.html"), /<img /);
+    assert.doesNotMatch(read(`s/${sharedToken("2026-10-26")}/hot-money.html`), /<img /);
     await dailyPage.publishIntraday("2026-10-26", []);
-    assert.match(read("s/2026-10-26/intraday.html"), /今日没有盘中异动推送/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/intraday.html`), /今日没有盘中异动推送/);
 });
