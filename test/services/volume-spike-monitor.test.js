@@ -3,7 +3,8 @@ const assert = require("node:assert/strict");
 const { createMarketSnapshotService, parseSinaList, parseSseList } = require("../../src/models/market/market-snapshot");
 const { VolumeSpikeMonitor, detectSpikes } = require("../../src/services/volume-spike-monitor");
 const { createVolumeSpikeMonitors } = require("../../src/controllers/volume-spike-controller");
-const { formatVolumeSpikeAlert } = require("../../src/views/volume-spike-view");
+const { generateVolumeSpikeChart } = require("../../src/views/charts/volume-spike-chart");
+const { formatVolumeSpikeAlert, formatVolumeSpikeCaption, volumeSpikeKeyboard } = require("../../src/views/volume-spike-view");
 
 // 北京时间 = UTC + 8；2026-10-28 是周三
 const at = hhmm => {
@@ -91,7 +92,7 @@ function setup({ snapshots, store = new Map(), sendError } = {}) {
         async saveState(date, label, state) { store.set(`${date}:${label}`, JSON.stringify(state)); },
         async recordAlert(date, label, content) { calls.records.push({ date, label, content }); }
     };
-    return { calls, deps, store, monitor: new VolumeSpikeMonitor({ label: "上午", start: "09:30", end: "11:30", lookbackMinutes: 5 }) };
+    return { calls, deps, store, monitor: new VolumeSpikeMonitor({ label: "上午", start: "09:30", end: "11:30", lookbackMinutes: 5, pushMinutes: 15 }) };
 }
 
 test("监控流程：攒满回看时长后比较；发现的股票攒到15分钟时点汇总推送，同一股票不重复；重启后从库里恢复", async () => {
@@ -156,7 +157,7 @@ test("监控流程：个别分钟拉取失败时，用更早一点的快照回�
     assert.match(down.calls.alerts[0], /上午量价异动.*连续3次/);
 });
 
-test("量价异动推送：纯文字，每行含触发时间、变化、成交额与当日涨跌幅；超过上限注明只列前几只", () => {
+test("量价异动推送：文字版每行含触发时间、变化、成交额与当日涨跌幅，超过上限注明只列前几只；图片说明只有标题，股票在按钮里", () => {
     const content = {
         label: "上午", time: "10:15", since: "10:00", lookbackMinutes: 5, sources: { "上交所": 2300, "新浪": 2900 }, upTotal: 3, downTotal: 1,
         up: [{ ...stock("600000", 5.2, 3e8, "浦发银行"), windowChange: 2.6, windowAmount: 1.2e8, time: "10:05" }],
@@ -166,4 +167,10 @@ test("量价异动推送：纯文字，每行含触发时间、变化、成交�
     assert.match(text, /🔺 急涨放量<\/b> 3只（列前1）\n<code>10:05<\/code> <a [^>]+>浦发银行<\/a> <b>\+2\.60%<\/b> 成交1\.20亿 今日\+5\.20%/);
     assert.match(text, /🔻 急跌放量<\/b> 1只\n<code>10:12<\/code> <a [^>]+>平安银行<\/a> <b>-2\.20%<\/b> 成交6500万 今日-4\.10%/);
     assert.match(text, /沪市上交所、深市新浪财经/);
+
+    const caption = formatVolumeSpikeCaption(content);
+    assert.match(caption, /^<b>⚡ 上午量价异动｜10:00-10:15<\/b>\n<i>点下方按钮打开东方财富App。\/spike off 关闭提醒<\/i>$/);
+    const keyboard = volumeSpikeKeyboard({ ...content, watchSymbols: new Set(["000001"]) });
+    assert.deepEqual(keyboard.inline_keyboard.map(row => row.map(button => button.text)), [["📈浦发银行", "📉平安银行⭐"]]);
+    assert.equal(generateVolumeSpikeChart(content).subarray(1, 4).toString(), "PNG");
 });

@@ -82,4 +82,24 @@ class StockLink {
 // 消息末尾的说明
 const STOCK_LINK_LEGEND = "点股票名称打开东方财富App";
 
-module.exports = { STOCK_LINK_LEGEND, StockLink };
+// 涨/跌方向的按钮标记（emoji 没有红绿箭头，用走势图）
+const UP_MARK = "📈";
+const DOWN_MARK = "📉";
+
+/**
+ * 排行图片下方的股票按钮：按图中顺序每行 columns 个，按钮为“方向标记+名称”，点击打开东方财富；自选股名称后加 ⭐。
+ *   groups：[{ mark, rows }]，rows 为带 symbol/name 的股票
+ */
+function stockButtonMarkup(groups, watchSymbols = new Set(), columns = 2) {
+    const buttons = groups.flatMap(({ mark, rows }) => rows.map(row => {
+        const stock = new StockLink(row.symbol, String(row.name || "").replace(/\s+/g, ""));
+        return { text: `${mark}${stock.name || stock.symbol}${watchSymbols.has(stock.symbol) ? "⭐" : ""}`, url: stock.appUrl("eastmoney") };
+    }));
+    const inlineKeyboard = [];
+    for (let i = 0; i < buttons.length; i += columns) inlineKeyboard.push(buttons.slice(i, i + columns));
+    return { inline_keyboard: inlineKeyboard };
+}
+
+const STOCK_BUTTON_LEGEND = "点下方按钮打开东方财富App";
+
+module.exports = { DOWN_MARK, STOCK_BUTTON_LEGEND, STOCK_LINK_LEGEND, StockLink, UP_MARK, stockButtonMarkup };

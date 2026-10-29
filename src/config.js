@@ -51,7 +51,7 @@ const config = {
     volumeSpike: {
         get windows() { return env.VOLUME_SPIKE_WINDOWS || "上午@09:30-11:30,下午@13:00-14:57"; },
         get lookbackMinutes() { return Math.ceil(positiveNumber(env.VOLUME_SPIKE_LOOKBACK_MINUTES, 5)); },
-        get pushMinutes() { return Math.ceil(positiveNumber(env.VOLUME_SPIKE_PUSH_MINUTES, 15)); },
+        get pushMinutes() { return Math.ceil(positiveNumber(env.VOLUME_SPIKE_PUSH_MINUTES, 10)); },
         get minAmount() { return positiveNumber(env.VOLUME_SPIKE_MIN_AMOUNT_WAN, 5000) * 10000; },
         get minChangePct() { return positiveNumber(env.VOLUME_SPIKE_MIN_CHANGE_PCT, 2); }
     },

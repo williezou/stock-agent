@@ -186,7 +186,7 @@ function fundFlowToggledText(enabled) {
 
 function volumeSpikeToggledText(enabled) {
     return enabled
-        ? "✅ 已开启量价异动提醒：交易日盘中（默认9:30-11:30、13:00-14:57）几分钟内放量急涨急跌的股票每15分钟汇总推送一次。发送 /spike off 可关闭。"
+        ? "✅ 已开启量价异动提醒：交易日盘中（默认9:30-11:30、13:00-14:57）几分钟内放量急涨急跌的股票每10分钟汇总推送一次。发送 /spike off 可关闭。"
         : "已关闭量价异动提醒，其他推送不受影响。发送 /spike on 可重新开启。";
 }
 

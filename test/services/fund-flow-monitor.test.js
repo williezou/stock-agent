@@ -4,7 +4,7 @@ const { createFundFlowService, parseFlowRows, parseSinaFlowRows } = require("../
 const { FundFlowMonitor, detectSurges, takeBaseline } = require("../../src/services/fund-flow-monitor");
 const { createMonitors, prepareDelivery } = require("../../src/controllers/fund-flow-controller");
 const { generateFundFlowChart } = require("../../src/views/charts/fund-flow-chart");
-const { formatFundFlowAlert, formatFundFlowCaption } = require("../../src/views/fund-flow-view");
+const { formatFundFlowAlert, formatFundFlowCaption, fundFlowKeyboard } = require("../../src/views/fund-flow-view");
 
 // 北京时间 = UTC + 8；2026-10-28 是周三
 const at = hhmm => {
@@ -110,7 +110,7 @@ function setup({ snapshots, subscribers = [{ chat_id: "100" }, { chat_id: "200" 
         prepare: content => async (chatId, watchSymbols) => {
             const error = sendError && sendError(chatId);
             if (error) throw error;
-            calls.messages.push({ chatId, content, text: formatFundFlowCaption({ ...content, watchSymbols }) });
+            calls.messages.push({ chatId, content, text: formatFundFlowAlert({ ...content, watchSymbols }) });
         },
         isBotBlocked: error => error?.response?.status === 403,
         async deactivateSubscriber(chatId) { calls.deactivated.push(chatId); },
@@ -225,15 +225,16 @@ const CONTENT = {
     outflow: [{ ...row("000858", -6.2e8, 3.5e9, { name: "五 粮 液", changePct: -6.04 }), delta: -7.951e7, estimated: true }]
 };
 
-test("推送视图：图片说明列出股票（自选股加⭐、名称去空格、可跳转App），文字版附涨跌幅", () => {
+test("推送视图：图片说明只有标题与概况，股票在按钮里（自选股加⭐、名称去空格、涨跌用走势图标记）；文字版附涨跌幅", () => {
     const watchSymbols = new Set(["000858"]);
     const caption = formatFundFlowCaption({ ...CONTENT, watchSymbols });
-    assert.match(caption, /<b>🚨 尾盘资金异动｜14:45<\/b>\n较14:30：主力加速流入1只、加速流出1只/);
-    assert.match(caption, /<b>🔺 主力加速流入<\/b>\n<a href="https:\/\/mlink\.eastmoney\.com\/h52n\/nlink\.html\?type=localurl&amp;id=eastmoney%3A%2F%2Fpage%2Fstockpage%3Fcode%3D300308%26market%3D0">中际旭创<\/a> <b>\+8\.75亿<\/b>\n/);
-    assert.match(caption, /<b>🔻 主力加速流出<\/b>\n⭐<a [^>]+>五粮液<\/a> <b>≤-7951万<\/b>\n/);
-    assert.doesNotMatch(caption, /<code>|-6\.04%/, "图片说明不带代码和涨跌幅");
+    assert.match(caption, /^<b>🚨 尾盘资金异动｜14:45<\/b>\n较14:30：主力加速流入1只、加速流出1只\n<i>点下方按钮/);
+    assert.doesNotMatch(caption, /<a /);
     assert.match(caption, /非交易所官方口径/);
+    assert.deepEqual(fundFlowKeyboard({ ...CONTENT, watchSymbols }).inline_keyboard.flat().map(button => button.text), ["📈中际旭创", "📉五粮液⭐"]);
+    assert.match(fundFlowKeyboard({ ...CONTENT, watchSymbols }).inline_keyboard[0][0].url, /stockpage%3Fcode%3D300308%26market%3D0/);
     const text = formatFundFlowAlert({ ...CONTENT, watchSymbols });
+    assert.match(text, /<b>🔺 主力加速流入<\/b>\n<a href="https:\/\/mlink\.eastmoney\.com\/h52n\/nlink\.html\?type=localurl&amp;id=eastmoney%3A%2F%2Fpage%2Fstockpage%3Fcode%3D300308%26market%3D0">中际旭创<\/a> <b>\+8\.75亿<\/b> \+8\.27%\n/);
     assert.match(text, /⭐<a [^>]+>五粮液<\/a> <b>≤-7951万<\/b> -6\.04%/);
 });
 
@@ -257,8 +258,8 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
     assert.ok(Buffer.isBuffer(photos[0].photo));
     assert.equal(photos[0].filename, "fund-flow-1445.png");
     assert.equal(photos[1].photo, "large");
-    assert.equal(photos[0].options, undefined, "不带按钮");
-    assert.match(photos[1].caption, /⭐<a [^>]+>中际旭创<\/a>/);
+    assert.deepEqual(photos[0].options.replyMarkup.inline_keyboard.flat().map(button => button.text), ["📈中际旭创", "📉五粮液"]);
+    assert.deepEqual(photos[1].options.replyMarkup.inline_keyboard.flat().map(button => button.text), ["📈中际旭创⭐", "📉五粮液"], "按钮按各自自选股标⭐");
 
     const texts = [];
     const fallback = prepareDelivery(CONTENT, {

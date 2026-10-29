@@ -1,27 +1,28 @@
 const { createCanvas } = require("@napi-rs/canvas");
 const { font } = require("./cjk-font");
 
-// 排行条形图（资金异动、量价异动共用）：上下两段横向条形图；每行第一行为名称+当日涨跌幅，第二行为代码+说明，右侧为数值
+// 排行条形图（资金异动、量价异动、游资动向共用）：上下两段横向条形图；每行第一行为名称+当日涨跌幅，第二行为代码+说明，右侧为数值
 const WIDTH = 1080;
 const PADDING = 48;
-const HEADER_HEIGHT = 150;
-const SECTION_TITLE_HEIGHT = 56;
-const ROW_HEIGHT = 72;
+const HEADER_HEIGHT = 176;
+const SECTION_TITLE_HEIGHT = 68;
+const ROW_HEIGHT = 96;
 const SECTION_GAP = 24;
-const FOOTER_HEIGHT = 70;
+const FOOTER_HEIGHT = 84;
 const NAME_LEFT = PADDING + 56;
-const BAR_LEFT = 500;
-const BAR_MAX_WIDTH = 330;
+const BAR_LEFT = 600;
+const BAR_MAX_WIDTH = 240;
 
+// 浅色主题
 const COLORS = {
-    background: "#0a1220",
-    panel: "#111d31",
-    grid: "#2b394e",
-    text: "#e2e8f0",
-    muted: "#8b97ab",
-    up: "#f55252",
-    gold: "#facc15",
-    down: "#22c55e"
+    background: "#ffffff",
+    panel: "#f4f6f9",
+    grid: "#e2e8f0",
+    text: "#1e293b",
+    muted: "#64748b",
+    up: "#e03131",
+    gold: "#d97706",
+    down: "#16a34a"
 };
 
 function signColor(value) {
@@ -42,10 +43,10 @@ function fitText(ctx, text, maxWidth) {
 
 function drawSection(ctx, { title, rows, color, top, scale, detail, value, magnitude, badge, nameMaxWidth }) {
     ctx.fillStyle = color;
-    ctx.fillRect(PADDING, top + 14, 8, 28);
+    ctx.fillRect(PADDING, top + 16, 8, 34);
     ctx.fillStyle = COLORS.text;
-    ctx.font = font(28, "bold");
-    ctx.fillText(title, PADDING + 22, top + 39);
+    ctx.font = font(34, "bold");
+    ctx.fillText(title, PADDING + 22, top + 46);
 
     rows.forEach((row, index) => {
         const y = top + SECTION_TITLE_HEIGHT + index * ROW_HEIGHT;
@@ -54,37 +55,36 @@ function drawSection(ctx, { title, rows, color, top, scale, detail, value, magni
             ctx.fillRect(PADDING, y, WIDTH - PADDING * 2, ROW_HEIGHT - 6);
         }
         ctx.fillStyle = COLORS.muted;
-        ctx.font = font(20);
-        ctx.fillText(String(index + 1), PADDING + 14, y + 40);
+        ctx.font = font(26);
+        ctx.fillText(String(index + 1), PADDING + 14, y + 54);
 
-        ctx.fillStyle = COLORS.text;
-        ctx.font = font(27, "bold");
         // 名称与标签都不能压到条形图：先量出标签宽度，名称在剩余空间内截断
         const tag = badge(row);
-        ctx.font = font(23, "bold");
+        ctx.font = font(28, "bold");
         const tagWidth = tag ? ctx.measureText(tag.text).width + 14 : 0;
-        ctx.font = font(27, "bold");
+        ctx.fillStyle = COLORS.text;
+        ctx.font = font(34, "bold");
         const name = fitText(ctx, row.name, Math.min(nameMaxWidth, BAR_LEFT - NAME_LEFT - 20 - tagWidth));
-        ctx.fillText(name, NAME_LEFT, y + 32);
+        ctx.fillText(name, NAME_LEFT, y + 42);
         const nameWidth = ctx.measureText(name).width;
         if (tag) {
             ctx.fillStyle = tag.color || COLORS.text;
-            ctx.font = font(23, "bold");
-            ctx.fillText(tag.text, NAME_LEFT + nameWidth + 14, y + 31);
+            ctx.font = font(28, "bold");
+            ctx.fillText(tag.text, NAME_LEFT + nameWidth + 14, y + 41);
         }
 
         ctx.fillStyle = COLORS.muted;
-        ctx.font = font(18);
-        ctx.fillText(fitText(ctx, detail(row), BAR_LEFT - NAME_LEFT - 20), NAME_LEFT, y + 58);
+        ctx.font = font(24);
+        ctx.fillText(fitText(ctx, detail(row), BAR_LEFT - NAME_LEFT - 20), NAME_LEFT, y + 78);
 
         const barWidth = Math.max(4, magnitude(row) / scale * BAR_MAX_WIDTH);
         ctx.fillStyle = color;
-        ctx.fillRect(BAR_LEFT, y + 22, barWidth, 26);
+        ctx.fillRect(BAR_LEFT, y + 29, barWidth, 32);
 
         ctx.fillStyle = color;
-        ctx.font = font(28, "bold");
+        ctx.font = font(36, "bold");
         ctx.textAlign = "right";
-        ctx.fillText(value(row), WIDTH - PADDING - 12, y + 45);
+        ctx.fillText(value(row), WIDTH - PADDING - 12, y + 58);
         ctx.textAlign = "left";
     });
     return top + SECTION_TITLE_HEIGHT + rows.length * ROW_HEIGHT;
@@ -107,7 +107,7 @@ function generateRankedChart({
     value,
     magnitude,
     badge = changeBadge,
-    nameMaxWidth = 190
+    nameMaxWidth = 260
 }) {
     const sections = input
         .filter(section => section.rows.length)
@@ -123,11 +123,11 @@ function generateRankedChart({
     ctx.fillRect(0, 0, WIDTH, height);
 
     ctx.fillStyle = COLORS.text;
-    ctx.font = font(40, "bold");
-    ctx.fillText(title, PADDING, 66);
+    ctx.font = font(48, "bold");
+    ctx.fillText(fitText(ctx, title, WIDTH - PADDING * 2), PADDING, 76);
     ctx.fillStyle = COLORS.muted;
-    ctx.font = font(22);
-    ctx.fillText(subtitle, PADDING, 108);
+    ctx.font = font(28);
+    ctx.fillText(fitText(ctx, subtitle, WIDTH - PADDING * 2), PADDING, 128);
     ctx.fillStyle = COLORS.grid;
     ctx.fillRect(PADDING, HEADER_HEIGHT - 20, WIDTH - PADDING * 2, 2);
 
@@ -137,8 +137,8 @@ function generateRankedChart({
     }
 
     ctx.fillStyle = COLORS.muted;
-    ctx.font = font(17);
-    ctx.fillText(footer, PADDING, height - 30);
+    ctx.font = font(22);
+    ctx.fillText(fitText(ctx, footer, WIDTH - PADDING * 2), PADDING, height - 34);
     return canvas.toBuffer("image/png");
 }
 

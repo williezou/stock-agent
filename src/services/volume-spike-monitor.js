@@ -30,7 +30,7 @@ function detectSpikes(previous, current, { minAmount, minChangePct }) {
 }
 
 class VolumeSpikeMonitor {
-    constructor({ label, start, end, lookbackMinutes = 5, pushMinutes = 15, minAmount = 5e7, minChangePct = 2, maxPerSide = 8 }) {
+    constructor({ label, start, end, lookbackMinutes = 5, pushMinutes = 10, minAmount = 5e7, minChangePct = 2, maxPerSide = 8 }) {
         this.label = label;
         this.start = FundFlowMonitor.parseTime(start);
         this.end = FundFlowMonitor.parseTime(end);

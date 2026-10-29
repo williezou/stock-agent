@@ -5,7 +5,7 @@ const { createFundFlowService } = require("../models/market/fund-flow");
 const { isTradingDay } = require("../models/market/trading-calendar");
 const { FundFlowMonitor } = require("../services/fund-flow-monitor");
 const { generateFundFlowChart } = require("../views/charts/fund-flow-chart");
-const { formatFundFlowAlert, formatFundFlowCaption } = require("../views/fund-flow-view");
+const { formatFundFlowAlert, formatFundFlowCaption, fundFlowKeyboard } = require("../views/fund-flow-view");
 
 // 资金异动提醒控制器：按配置的时间段（FUND_FLOW_WINDOWS）各建一个监控实例，调度器每轮依次执行
 function createMonitors(fundFlowConfig = config.fundFlow) {
@@ -17,27 +17,30 @@ function createMonitors(fundFlowConfig = config.fundFlow) {
     }));
 }
 
-// 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），图片说明按各自自选股标 ⭐；
-// 图表生成失败时退回文字版，保证不漏推。caption/text/filePrefix 默认为资金异动，量价异动传入自己的格式
+// 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），图片下方的股票按钮按各自自选股标 ⭐；
+// 图表生成失败时退回文字版，保证不漏推。caption/text/keyboard/filePrefix 默认为资金异动，量价异动传入自己的格式
 function prepareDelivery(content, {
     render,
     sendPhoto,
     sendMessage,
     caption = formatFundFlowCaption,
     text = formatFundFlowAlert,
+    keyboard = fundFlowKeyboard,
     filePrefix = "fund-flow"
 }) {
     let png = null;
     try {
         png = render(content);
     } catch (error) {
-        console.error(`⚠️ ${content.label}资金异动图表生成失败，改发文字：${formatError(error)}`);
+        console.error(`⚠️ ${content.label}异动图表生成失败，改发文字：${formatError(error)}`);
     }
     let fileId = null;
     return async (chatId, watchSymbols) => {
         const personal = { ...content, watchSymbols };
         if (!png) return sendMessage(chatId, text(personal));
-        const message = await sendPhoto(chatId, fileId || png, caption(personal), `${filePrefix}-${content.time.replace(":", "")}.png`);
+        const message = await sendPhoto(chatId, fileId || png, caption(personal), `${filePrefix}-${content.time.replace(":", "")}.png`, {
+            replyMarkup: keyboard(personal)
+        });
         fileId = fileId || telegram.largestPhotoFileId(message);
     };
 }

@@ -5,7 +5,7 @@ const { generateRankedChart, pctText } = require("./ranked-chart");
 function generateFundFlowChart(content) {
     return generateRankedChart({
         title: titleText(content),
-        subtitle: `${summaryText(content)}｜条形与右侧数字为区间主力净额变化`,
+        subtitle: `${summaryText(content)}｜数值为区间主力净额变化`,
         footer: sourceNote(content.source),
         sections: [
             { title: "主力加速流入", rows: content.inflow, up: true },

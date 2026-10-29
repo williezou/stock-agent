@@ -1,8 +1,9 @@
 const { escapeHtml, signed } = require("./format");
 const { signedAmount } = require("./fund-flow-view");
-const { StockLink } = require("./stock-link");
+const { DOWN_MARK, STOCK_BUTTON_LEGEND, StockLink, UP_MARK, stockButtonMarkup } = require("./stock-link");
 
-// 量价异动推送（纯文字）：每只股票一行，含触发时间、回看时段内的涨跌幅变化与成交额、当日涨跌幅；名称可跳转东方财富App
+// 量价异动推送：图表（每只股票的触发时间、回看时段内的涨跌幅变化与成交额、当日涨跌幅）+ 图片说明（只有标题）
+// + 图片下方的股票按钮（可跳转App）；图表生成失败时退回文字版（每只股票一行，名称可跳转App）
 const OPT_OUT_NOTE = "/spike off 关闭提醒";
 
 // 回看时段内的成交额（总为正，不带符号）
@@ -20,9 +21,18 @@ function titleText({ label, since, time }) {
     return `${label}量价异动｜${since}-${time}`;
 }
 
+// 某方向超过推送上限时注明只列前几只
+function countText(total, rows) {
+    return total > rows.length ? `${total}只（列前${rows.length}）` : `${total}只`;
+}
+
+function summaryText({ up, down, upTotal = up.length, downTotal = down.length }) {
+    return `急涨放量${countText(upTotal, up)}、急跌放量${countText(downTotal, down)}`;
+}
+
 // 分段标题带只数，超过推送上限时注明只列前几只
 function sectionTitle(emoji, title, total, rows) {
-    return `<b>${emoji} ${title}</b> ${total > rows.length ? `${total}只（列前${rows.length}）` : `${total}只`}`;
+    return `<b>${emoji} ${title}</b> ${countText(total, rows)}`;
 }
 
 // 每只股票一行：触发时间、名称（自选股加 ⭐）、回看时段内的涨跌幅变化（加粗）、这段时间的成交额、当日涨跌幅
@@ -32,6 +42,7 @@ function stockLine(row, watchSymbols) {
     return `<code>${row.time}</code> ${star}${stock} <b>${signed(row.windowChange)}</b> 成交${amountText(row.windowAmount)} 今日${signed(row.changePct)}`;
 }
 
+// 文字版（图表生成失败时的后备）
 function formatVolumeSpikeAlert(content) {
     const { up, down, upTotal = up.length, downTotal = down.length, watchSymbols = new Set() } = content;
     const lines = [`<b>⚡ ${escapeHtml(titleText(content))}</b>`];
@@ -41,4 +52,22 @@ function formatVolumeSpikeAlert(content) {
     return lines.join("\n");
 }
 
-module.exports = { formatVolumeSpikeAlert };
+// 图片说明：标题，明细看图，股票在图片下方的按钮里
+function formatVolumeSpikeCaption(content) {
+    return `<b>⚡ ${escapeHtml(titleText(content))}</b>\n<i>${STOCK_BUTTON_LEGEND}。${OPT_OUT_NOTE}</i>`;
+}
+
+// 图片下方的股票按钮，顺序与图中一致
+function volumeSpikeKeyboard({ up, down, watchSymbols }) {
+    return stockButtonMarkup([{ mark: UP_MARK, rows: up }, { mark: DOWN_MARK, rows: down }], watchSymbols);
+}
+
+module.exports = {
+    amountText,
+    formatVolumeSpikeAlert,
+    formatVolumeSpikeCaption,
+    sourceNote,
+    summaryText,
+    titleText,
+    volumeSpikeKeyboard
+};

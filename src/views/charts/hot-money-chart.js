@@ -1,10 +1,10 @@
 const { signedAmount } = require("../fund-flow-view");
-const { boughtStocks, isHighWinRate, statsText, summaryText, titleText } = require("../hot-money-view");
+const { boughtStocks, statsText, summaryText, titleText } = require("../hot-money-view");
 const { shortSeatName } = require("../longhu-view");
 const { COLORS, generateRankedChart } = require("./ranked-chart");
 
-// 游资动向图表：高胜率游资（金色）与游资净买入排行（红色）两段，名称后为胜率标签（高胜率为金色），第二行为买入的股票。
-// 图表字体不含emoji，名称不带🏆，高胜率靠金色标签区分
+// 游资动向图表：高胜率游资（金色）与游资净买入排行（红色）两段，第二行为胜率与买入的股票（营业部名称较长，胜率不放名称后）。
+// 图表字体不含emoji，名称不带🏆
 function generateHotMoneyChart(content) {
     return generateRankedChart({
         title: titleText(content),
@@ -14,9 +14,10 @@ function generateHotMoneyChart(content) {
             { title: "高胜率游资今日出手", rows: (content.highWinSeats || []).map(seat => ({ ...seat, name: shortSeatName(seat.name) })), color: COLORS.gold },
             { title: "游资净买入", rows: content.seats.map(seat => ({ ...seat, name: shortSeatName(seat.name) })), up: true }
         ],
-        nameMaxWidth: 300,
-        badge: seat => ({ text: statsText(seat.stats).replace(/（.*）/, ""), color: isHighWinRate(seat.stats) ? COLORS.gold : COLORS.muted }),
-        detail: seat => boughtStocks(seat).map(stock => `${stock.name}${signedAmount(stock.net)}`).join("  ") || "以卖出为主",
+        nameMaxWidth: Infinity,
+        badge: () => null,
+        detail: seat => [statsText(seat.stats).replace(/（.*）/, ""), ...boughtStocks(seat).map(stock => `${stock.name}${signedAmount(stock.net)}`)].join("  ")
+            + (boughtStocks(seat).length ? "" : "  以卖出为主"),
         value: seat => signedAmount(seat.net),
         magnitude: seat => Math.abs(seat.net)
     });

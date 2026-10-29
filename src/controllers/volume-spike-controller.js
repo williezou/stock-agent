@@ -5,7 +5,9 @@ const { createMarketSnapshotService } = require("../models/market/market-snapsho
 const { isTradingDay } = require("../models/market/trading-calendar");
 const { FundFlowMonitor } = require("../services/fund-flow-monitor");
 const { VolumeSpikeMonitor } = require("../services/volume-spike-monitor");
-const { formatVolumeSpikeAlert } = require("../views/volume-spike-view");
+const { generateVolumeSpikeChart } = require("../views/charts/volume-spike-chart");
+const { formatVolumeSpikeAlert, formatVolumeSpikeCaption, volumeSpikeKeyboard } = require("../views/volume-spike-view");
+const { prepareDelivery } = require("./fund-flow-controller");
 
 // 量价异动提醒控制器：按配置的时间段（VOLUME_SPIKE_WINDOWS）各建一个监控实例；接收者为 /spike 开启的用户
 function createVolumeSpikeMonitors(spikeConfig = config.volumeSpike) {
@@ -36,13 +38,21 @@ async function runVolumeSpikeTick(store, now = new Date(), services = {}) {
     const active = monitors.filter(monitor => monitor.isActive(now));
     if (!active.length) return { action: "outside-window" };
     const sendMessage = services.sendMessage || telegram.sendMessage;
+    const senders = {
+        render: services.renderChart || generateVolumeSpikeChart,
+        sendPhoto: services.sendPhoto || telegram.sendPhoto,
+        sendMessage,
+        caption: formatVolumeSpikeCaption,
+        text: formatVolumeSpikeAlert,
+        keyboard: volumeSpikeKeyboard,
+        filePrefix: "volume-spike"
+    };
     const deps = {
         snapshot,
         isTradingDay: checkTradingDay,
         listSubscribers: () => store.listVolumeSpikeSubscribers(),
         listWatchSymbols: async chatId => new Set((await store.list(chatId)).map(target => target.symbol)),
-        // 纯文字推送，按各自自选股标 ⭐
-        prepare: content => async (chatId, watchSymbols) => sendMessage(chatId, formatVolumeSpikeAlert({ ...content, watchSymbols })),
+        prepare: content => prepareDelivery(content, senders),
         isBotBlocked: telegram.isBotBlockedError,
         deactivateSubscriber: chatId => store.deactivateSubscriber(chatId),
         alertContext: {
