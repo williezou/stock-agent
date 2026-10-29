@@ -114,7 +114,20 @@ async function publishLimitUp({ date, content, render }) {
     await putSharedHtml(date, "limit-up", app => view.limitUpFragment({ content, chartUrl, app }));
 }
 
-const dailyPage = { pageUrl, publishClose, publishHotMoney, publishIndex, publishIntraday, publishLimitUp, publishLonghu };
+// A股扫描：所有用户共用的独立网页（按App各一份，不进入每人的入口页）；返回 app => 网页地址。
+// 个股K线图与收盘报告同名共用（同一天同一只股票的日K相同）
+async function publishScan({ date, now, picksByStyle, longhiData }) {
+    const chartUrls = new Map();
+    for (const style of Object.keys(picksByStyle)) {
+        for (const { report } of picksByStyle[style]) {
+            if (report && !chartUrls.has(report.meta.symbol)) chartUrls.set(report.meta.symbol, await stockChartUrl(report, date));
+        }
+    }
+    await putSharedHtml(date, "scan", app => view.scanPageHtml({ date, now, picksByStyle, longhiData, chartUrls, app }));
+    return app => publicUrl(paths.sharedHtml(date, "scan", app));
+}
+
+const dailyPage = { pageUrl, publishClose, publishHotMoney, publishIndex, publishIntraday, publishLimitUp, publishLonghu, publishScan };
 
 // 控制器取用：测试注入 services.dailyPage；未配置时为 null，按原方式逐条推送
 function resolveDailyPage(services = {}) {

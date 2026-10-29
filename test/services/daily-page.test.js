@@ -15,6 +15,7 @@ const { config } = require("../../src/config");
 const { publicUrl } = require("../../src/gateways/page-storage");
 const { dailyPage, pageToken, resolveDailyPage, sharedToken } = require("../../src/services/daily-page");
 const view = require("../../src/views/daily-page-view");
+const { QuoteApp } = require("../../src/views/quote-app");
 
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -160,6 +161,9 @@ test("龙虎榜与游资写入共用目录，按App各写一份明细、图片�
     const limitUp = { date: "2026-10-26", limitUp: [{ symbol: "600000", name: "沪股", boards: 2, sealAmount: 1e8, industry: "银行", firstTime: "09:25", breaks: 0 }], limitDown: [], broken: [], yesterday: [], catalysts: {} };
     await dailyPage.publishLimitUp({ date: "2026-10-26", content: limitUp, render: () => Buffer.from("png") });
     assert.match(read(`s/${sharedToken("2026-10-26")}/limit-up.xueqiu.html`), /<img src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/limit-up.png"[^]*<a href="https:\/\/xueqiu.com\/S\/SH600000">沪股<\/a>/);
+    const scanUrl = await dailyPage.publishScan({ date: "2026-10-26", now: "2026-10-26 15:40:00", picksByStyle: { intraday: [{ item: { symbol: "600000", name: "沪股" }, report: null }] }, longhiData: {} });
+    assert.match(scanUrl(QuoteApp.get("xueqiu")), /^http:\/\/pages\.test\/s\/[0-9a-f]{32}\/scan\.xueqiu\.html$/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/scan.xueqiu.html`), /<title>A股扫描｜2026-10-26<\/title>[^]*xueqiu\.com\/S\/SH600000/);
     await dailyPage.publishIntraday("2026-10-26", []);
     assert.match(read(`s/${sharedToken("2026-10-26")}/intraday.cmschina.html`), /今日没有盘中异动推送/);
 });

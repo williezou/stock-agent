@@ -68,6 +68,12 @@ function createMemoryStore(initial = [], registered = true) {
             subscriber.limit_up_enabled = enabled;
             return true;
         },
+        async setScanEnabled(chatId, enabled) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.scan_enabled = enabled;
+            return true;
+        },
         async setQuoteApp(chatId, appKey) {
             const subscriber = subscribers.get(String(chatId));
             if (!subscriber) return false;
@@ -579,4 +585,14 @@ test("/limit 单独切换涨停复盘推送", async () => {
     assert.match(sent.at(-1).text, /已开启涨停复盘/);
     await controller.handleUpdate(privateMessage("/limit maybe"));
     assert.match(sent.at(-1).text, /\/limit on/);
+});
+
+test("/scan 单独切换A股扫描推送", async () => {
+    const { controller, sent, store } = setup();
+    await controller.handleUpdate(privateMessage("/scan off"));
+    assert.equal((await store.getSubscriber(100)).scan_enabled, false);
+    assert.match(sent.at(-1).text, /已关闭A股扫描推送/);
+    await controller.handleUpdate(privateMessage("/scan"));
+    assert.equal((await store.getSubscriber(100)).scan_enabled, true);
+    assert.match(sent.at(-1).text, /已开启A股扫描/);
 });

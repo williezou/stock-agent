@@ -74,7 +74,7 @@ test/              与 src/ 结构对应
 
 ## 运行
 ```
-npm run scan            # A股扫描，推送给 TELEGRAM_CHAT_ID（日常由 GitHub Actions 定时执行）
+npm run scan            # 手动A股扫描，推送给 TELEGRAM_CHAT_ID（日常由云端调度器执行并写成网页）
 npm run scan:dry-run    # 只输出到终端
 ```
 
@@ -88,7 +88,7 @@ npm run daily-close:dry-run
 npm run daily-close
 ```
 
-A股扫描由 GitHub Actions 工作流 `.github/workflows/scan.yml` 在工作日定时执行（请求量大，避免本机 IP 被行情接口封禁）；股票池优先取自东方财富，失败时切换新浪财经。`daily-close.yml` 仅保留手动触发，作为本机不可用时的备用；收盘报告与龙虎榜由本地 Docker 调度器执行，避免重复。仓库需要配置 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 和 PostgreSQL 外部连接地址 `DATABASE_URL` Secrets；脚本会检查全部追踪股票是否都有当天完整日 K，节假日不会发送。
+A股扫描由云端调度器在交易日 15:40 起执行一次（避开收盘报告首轮；取数失败 10 分钟后重试，17:00 仍失败才提醒管理员）：股票池优先取自东方财富，失败时切换新浪财经；结果写成所有用户共用的网页（按行情App各一份：今日结论、四类入选的个股卡片含K线/交易计划/筹码/催化、市场热点），给开启 `/scan` 的用户推送今日结论与网页按钮，网页写入失败时推送完整结论文字。GitHub Actions 的 `scan.yml` 与 `daily-close.yml` 已停用（保留文件，需要时可手动启用）；`npm run scan` 仍可手动运行，只推给管理员。
 
 ## Telegram 菜单与 Render 部署
 
@@ -156,6 +156,7 @@ npm run telegram:configure
 - `/flow` 开启/关闭尾盘资金异动提醒（也可 `/flow on`、`/flow off`），默认开启
 - `/spike` 开启/关闭盘中量价异动提醒（也可 `/spike on`、`/spike off`），默认开启
 - `/limit` 开启/关闭收盘涨停复盘推送（也可 `/limit on`、`/limit off`），默认开启
+- `/scan` 开启/关闭收盘A股扫描推送（也可 `/scan on`、`/scan off`），默认开启
 - `/app` 选择点股票名称打开的App（按钮选择，或 `/app 雪球`），推送、回复与每日总结网页都按此生成链接
 - 龙虎榜推送图片下方点股票名称，查看该股当日买卖席位表格（同一只股票60秒内不重复发送）
 - `/stop` 暂停个人每日推送，`/start` 可恢复

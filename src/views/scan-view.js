@@ -43,7 +43,7 @@ function marketTone(longhiData) {
     return `涨停${upText}家／跌停${downText}家，情绪${tone}`;
 }
 
-function adviceLines(picksByStyle, longhiData, withReasons = true) {
+function adviceLines(picksByStyle, longhiData, { withReasons = true, app } = {}) {
     const reports = STYLE_ORDER.flatMap(style => picksByStyle[style] || []).map(pick => pick.report).filter(Boolean);
     const actionable = rankActionable(reports);
     const lines = ["<b>🧭 今日结论</b>"];
@@ -59,7 +59,7 @@ function adviceLines(picksByStyle, longhiData, withReasons = true) {
     actionable.forEach((report, index) => {
         const { meta, plan } = report;
         lines.push(
-            `${index + 1}. ${StockLink.of(meta).html()}［${STYLE_LABELS[report.style]}］<b>${plan.recommendation}</b>`,
+            `${index + 1}. ${StockLink.of(meta, app).html()}［${STYLE_LABELS[report.style]}］<b>${plan.recommendation}</b>`,
             `　回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}｜止损 ${number(plan.stop)}｜目标 ${number(plan.target)}｜盈亏比 ${number(plan.rewardRisk)}:1`,
             ...(withReasons ? [`　${escapeHtml(plan.reason)}`] : [])
         );
@@ -103,7 +103,7 @@ function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
     ].filter(Boolean);
     const build = ({ withReasons, withMarket }) => [
         `<b>A股扫描</b>｜${escapeHtml(now)}`,
-        adviceLines(picksByStyle, longhiData, withReasons).join("\n"),
+        adviceLines(picksByStyle, longhiData, { withReasons }).join("\n"),
         styleLines.join("\n"),
         ...(withMarket && marketLines.length ? [["<b>🔥 市场热点（不含已入选）</b>", ...marketLines].join("\n")] : []),
         `<i>${stockLinkLegend()}。以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</i>`
@@ -119,6 +119,18 @@ function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
         if (visibleLength(text) <= TELEGRAM_TEXT_LIMIT && entityCount(text) <= MAX_ENTITIES) return text;
     }
     throw new Error("扫描结论超过Telegram 4096字符或100个格式实体的限制");
+}
+
+// 网页版扫描的推送：今日结论（不含理由）+ 入选概况，股票名称打开所选App；分类入选与个股K线在网页里
+function formatScanMessage({ now, picksByStyle, longhiData = {} }, { app } = {}) {
+    const total = STYLE_ORDER.reduce((sum, style) => sum + (picksByStyle[style] || []).length, 0);
+    const counts = STYLE_ORDER.map(style => `${STYLE_LABELS[style]}${(picksByStyle[style] || []).length}`).join(" ");
+    return [
+        `<b>📈 A股扫描｜${escapeHtml(now)}</b>`,
+        adviceLines(picksByStyle, longhiData, { withReasons: false, app }).slice(1).join("\n"),
+        `入选${total}只（${counts}）`,
+        `<i>四类入选、个股K线与交易计划见网页；${stockLinkLegend(app)}。仅供参考，不构成投资建议。/scan off 关闭</i>`
+    ].join("\n");
 }
 
 function formatScanOverviewCaption(style, reports, date) {
@@ -149,6 +161,8 @@ function formatScanDelivery({ picksByStyle, date }) {
 
 module.exports = {
     STYLE_LABELS,
+    adviceLines,
+    formatScanMessage,
     formatScanDelivery,
     formatScanSummary,
     rankActionable

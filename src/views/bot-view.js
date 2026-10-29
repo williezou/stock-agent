@@ -15,6 +15,7 @@ const BOT_COMMANDS = [
     { command: "flow", description: "开启/关闭尾盘资金异动提醒" },
     { command: "spike", description: "开启/关闭盘中量价异动提醒" },
     { command: "limit", description: "开启/关闭收盘涨停复盘推送" },
+    { command: "scan", description: "开启/关闭收盘A股扫描推送" },
     { command: "app", description: "选择股票链接打开的行情App" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
@@ -34,7 +35,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = `点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒\n/limit 开启/关闭收盘涨停复盘（连板梯队）\n/app 选择点股票名称打开的App（${QuoteApp.all.map(app => app.label).join("/")}）`;
+const HELP_TEXT = `点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒\n/limit 开启/关闭收盘涨停复盘（连板梯队）\n/scan 开启/关闭收盘A股扫描（四类选股+网页）\n/app 选择点股票名称打开的App（${QuoteApp.all.map(app => app.label).join("/")}）`;
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -66,6 +67,7 @@ const MESSAGES = {
     invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
     invalidSpikeArgument: "用法：<code>/spike</code> 切换，<code>/spike on</code> 开启，<code>/spike off</code> 关闭。",
     invalidAppArgument: `可选：${QuoteApp.all.map(app => app.label).join("、")}。发送 <code>/app</code> 点按钮选择，或直接输入如 <code>/app 雪球</code>。`,
+    invalidScanArgument: "用法：<code>/scan</code> 切换，<code>/scan on</code> 开启，<code>/scan off</code> 关闭。",
     invalidLimitArgument: "用法：<code>/limit</code> 切换，<code>/limit on</code> 开启，<code>/limit off</code> 关闭。",
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
@@ -95,7 +97,7 @@ function userBlock(user, index) {
     const name = user.first_name || user.username || user.chat_id;
     const handle = user.username ? `（@${user.username}）` : "";
     const watchlist = user.watchlist || [];
-    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关", user.volume_spike_enabled === false && "量价异动关", user.limit_up_enabled === false && "涨停复盘关"].filter(Boolean);
+    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关", user.volume_spike_enabled === false && "量价异动关", user.limit_up_enabled === false && "涨停复盘关", user.scan_enabled === false && "A股扫描关"].filter(Boolean);
     const app = QuoteApp.forSubscriber(user);
     if (app !== QuoteApp.DEFAULT) off.push(app.label);
     const lines = [
@@ -144,7 +146,7 @@ function usersMessages(users, maxSubscribers) {
     const inactive = users.filter(user => user.status !== "active" && user.status !== "banned");
     const blocks = [
         `<b>👥 订阅用户：启用 ${active.length}${maxSubscribers > 0 ? `/${maxSubscribers}` : ""}，停用 ${inactive.length}，拉黑 ${banned.length}</b>\n` +
-            `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人，开启量价异动 ${active.filter(user => user.volume_spike_enabled !== false).length} 人，开启涨停复盘 ${active.filter(user => user.limit_up_enabled !== false).length} 人`
+            `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人，开启量价异动 ${active.filter(user => user.volume_spike_enabled !== false).length} 人，开启涨停复盘 ${active.filter(user => user.limit_up_enabled !== false).length} 人，开启A股扫描 ${active.filter(user => user.scan_enabled !== false).length} 人`
     ];
     const summary = watchlistSummary(active);
     if (summary.length) {
@@ -230,6 +232,12 @@ function limitUpToggledText(enabled) {
         : "已关闭涨停复盘推送，其他推送不受影响。发送 /limit on 可重新开启。";
 }
 
+function scanToggledText(enabled) {
+    return enabled
+        ? "✅ 已开启A股扫描：交易日收盘后（约15:40）推送今日结论与可操作标的，四类入选、个股K线与交易计划见网页。发送 /scan off 可关闭。"
+        : "已关闭A股扫描推送，其他推送不受影响。发送 /scan on 可重新开启。";
+}
+
 function subscriberLabel(subscriber) {
     const name = subscriber.first_name || subscriber.username || subscriber.chat_id;
     const handle = subscriber.username ? `（@${subscriber.username}）` : "";
@@ -299,6 +307,7 @@ module.exports = {
     volumeSpikeToggledText,
     removeChoicesMarkup,
     removeKeyboardMarkup,
+    scanToggledText,
     notBannedText,
     parseAppCallbackData,
     removedText,

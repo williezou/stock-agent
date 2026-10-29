@@ -225,6 +225,14 @@ function createBotController({
         return reply(chatId, view.limitUpToggledText(enabled));
     }
 
+    // /scan 切换，/scan on|off 显式设置
+    async function setScanPush(chatId, argument, subscriber) {
+        const enabled = parseToggle(argument, subscriber.scan_enabled);
+        if (enabled === null) return reply(chatId, MESSAGES.invalidScanArgument);
+        await store.setScanEnabled(chatId, enabled);
+        return reply(chatId, view.scanToggledText(enabled));
+    }
+
     // /app 列出可选App（按钮选择），/app 雪球 直接设置
     async function chooseQuoteApp(chatId, argument, subscriber) {
         const current = QuoteApp.forSubscriber(subscriber);
@@ -334,6 +342,8 @@ function createBotController({
         if (spikeArgument !== null) return setVolumeSpikePush(chatId, spikeArgument, subscriber);
         const limitArgument = commandArgument(text, "limit");
         if (limitArgument !== null) return setLimitUpPush(chatId, limitArgument, subscriber);
+        const scanArgument = commandArgument(text, "scan");
+        if (scanArgument !== null) return setScanPush(chatId, scanArgument, subscriber);
         const appArgument = commandArgument(text, "app");
         if (appArgument !== null) return chooseQuoteApp(chatId, appArgument, subscriber);
 

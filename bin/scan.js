@@ -1,4 +1,4 @@
-// A股扫描（推送给管理员），由GitHub Actions定时执行；加 --dry-run 只打印不发送
+// A股扫描手动运行（推送给管理员）；日常由云端调度器执行并写成网页推送给所有用户。加 --dry-run 只打印不发送
 const { config } = require("../src/config");
 const { formatError } = require("../src/lib/http");
 const { nowChinaString } = require("../src/models/market/trading-calendar");

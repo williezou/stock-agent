@@ -6,6 +6,8 @@ const { formatLonghuMessage } = require("./longhu-view");
 const { chipsLine } = require("./daily-report-view");
 const { eventsLine } = require("./stock-events-view");
 const { StockLink } = require("./stock-link");
+const { STYLE_LABELS, STYLE_ORDER } = require("../constants");
+const { adviceLines: scanAdviceLines } = require("./scan-view");
 
 // 每日总结网页：一个入口页（按用户的推送开关列出各段）+ 各段的HTML片段（各任务完成时分别写入，入口页打开时加载）。
 // 片段内容复用Telegram推送的文字格式（<b>/<i>/<a>/<code> 本身就是合法HTML），按原换行显示；股票名称链接打开 app（用户选择的行情App）
@@ -63,34 +65,40 @@ document.querySelectorAll("[data-src]").forEach(async el => {
 });
 `;
 
-// 入口页：sections 为 [{ id, title, url, pending }]
-function dailyPageHtml({ date, sections }) {
+// 页面外壳：标题、顶部导航（sections 为 [{ id, title }]）与正文；script 为页内脚本
+function pageShell({ title, date, sections, body, script = "" }) {
     const nav = sections.map(section => `<a href="#${section.id}">${escapeHtml(section.title)}</a>`).join("");
-    const body = sections.map(section => [
-        `<section id="${section.id}">`,
-        `<h2>${escapeHtml(section.title)}</h2>`,
-        `<div data-src="${escapeHtml(section.url)}" data-pending="${escapeHtml(section.pending)}"><p class="card pending">加载中…</p></div>`,
-        "</section>"
-    ].join("")).join("\n");
     return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>每日总结｜${escapeHtml(date)}</title>
+<title>${escapeHtml(title)}｜${escapeHtml(date)}</title>
 <style>${STYLE}</style>
 </head>
 <body>
-<header><h1>每日总结<small>${escapeHtml(date)}</small></h1><nav>${nav}</nav></header>
+<header><h1>${escapeHtml(title)}<small>${escapeHtml(date)}</small></h1><nav>${nav}</nav></header>
 <main>
 ${body}
 </main>
 <footer>数据来自公开行情，仅供参考，不构成投资建议。</footer>
-<script>${LOADER}</script>
+${script ? `<script>${script}</script>` : ""}
 </body>
 </html>
 `;
+}
+
+function section({ id, title }, inner) {
+    return `<section id="${id}"><h2>${escapeHtml(title)}</h2>${inner}</section>`;
+}
+
+// 入口页：sections 为 [{ id, title, url, pending }]
+function dailyPageHtml({ date, sections }) {
+    const body = sections.map(item => section(item,
+        `<div data-src="${escapeHtml(item.url)}" data-pending="${escapeHtml(item.pending)}"><p class="card pending">加载中…</p></div>`
+    )).join("\n");
+    return pageShell({ title: "每日总结", date, sections, body, script: LOADER });
 }
 
 function card(inner) {
@@ -251,6 +259,36 @@ function limitUpFragment({ content, chartUrl, app }) {
     return parts.filter(Boolean).join("\n");
 }
 
+// A股扫描网页（所有用户共用，按App各一份）：今日结论（市场情绪与可操作标的）、四类入选的个股卡片（K线、交易计划、筹码、催化）、
+// 市场热点（涨跌停，不含已入选）。chartUrls：代码 → K线图地址
+function scanPageHtml({ date, now, picksByStyle, longhiData = {}, chartUrls, app }) {
+    const sections = [{ id: "advice", title: "🧭 今日结论" }];
+    const styleSections = STYLE_ORDER.map(style => ({ id: `style-${style}`, title: `${STYLE_LABELS[style]}入选`, style }));
+    sections.push(...styleSections, { id: "market", title: "🔥 市场热点" });
+
+    const advice = card(`<div class="tg">${scanAdviceLines(picksByStyle, longhiData, { app }).slice(1).join("\n")}</div><p class="note">扫描时间：${escapeHtml(now)}</p>`);
+    const styleBodies = styleSections.map(item => {
+        const picks = picksByStyle[item.style] || [];
+        if (!picks.length) return section(item, card('<p class="pending">无符合条件标的</p>'));
+        return section(item, picks.map(({ item: pick, report }) => (report
+            ? stockCard(report, chartUrls.get(report.meta.symbol), app)
+            : card(`${stockCell(pick, app)}｜K线数据不足，未生成建议`))).join("\n"));
+    });
+    const picked = new Set(STYLE_ORDER.flatMap(style => picksByStyle[style] || []).map(pick => pick.item.symbol));
+    const marketList = (title, rows) => {
+        const rest = (rows || []).filter(row => !picked.has(row.symbol));
+        return rest.length ? `<b>${title} ${rest.length}只</b><div class="tg">${rest.map(row => `${stockCell(row, app)} ${signed(row.changePct)}`).join("、")}</div>` : "";
+    };
+    const market = [marketList("📈 涨停", longhiData.riseStocks), marketList("📉 跌停", longhiData.declineStocks)].filter(Boolean);
+    const body = [
+        section(sections[0], advice),
+        ...styleBodies,
+        section(sections.at(-1), card(market.join("<br>") || '<p class="pending">涨跌停数据暂不可用</p>')),
+        '<p class="note">以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</p>'
+    ].join("\n");
+    return pageShell({ title: "A股扫描", date, sections, body });
+}
+
 // 推送消息下方打开网页的按钮
 function dailyPageButton(url) {
     return { inline_keyboard: [[{ text: "📄 打开今日总结", url }]] };
@@ -281,6 +319,7 @@ module.exports = {
     longhuUpdatedMessage,
     dailyPageButton,
     dailyPageHtml,
+    scanPageHtml,
     hotMoneyFragment,
     intradayFragment,
     limitUpFragment,
