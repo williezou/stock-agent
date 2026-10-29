@@ -83,13 +83,7 @@ const APPS = [
         aliases: ["东财", "em"],
         stockUrl: symbol => `${EASTMONEY_APP_LINK}${encodeURIComponent(`eastmoney://page/stockpage?code=${symbol}&market=${eastmoneyMarket(symbol)}`)}`
     }),
-    // 同花顺只提供手机版行情页（网页上可一键打开App）
-    new QuoteApp({
-        key: "tonghuashun",
-        label: "同花顺",
-        aliases: ["ths", "10jqka"],
-        stockUrl: symbol => `https://m.10jqka.com.cn/stockpage/hs_${symbol}/`
-    }),
+    // 同花顺不提供：其分享链接与通用链接都只能打开手机网页或App首页，进不了App个股页（实测）
     // 雪球个股页（已装App时 iOS 可直接打开App）
     new QuoteApp({
         key: "xueqiu",

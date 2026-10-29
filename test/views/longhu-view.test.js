@@ -72,7 +72,7 @@ test("图片说明只含概况；股票按钮每行3个，净卖出另起一行�
     assert.ok(rows.flat().every(button => Buffer.byteLength(button.callback_data) <= 64), "回调数据不超过64字节");
     assert.deepEqual(parseLonghuCallbackData("lhb:600100:20261027"), { symbol: "600100", date: "2026-10-27" });
     assert.equal(parseLonghuCallbackData("delete:600100"), null);
-    assert.deepEqual(formatSeatKeyboard({ date: "2026-10-27", symbol: "002249" }).inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "雪球", "招商证券", "电脑版"]);
+    assert.deepEqual(formatSeatKeyboard({ date: "2026-10-27", symbol: "002249" }).inline_keyboard[0].map(button => button.text), ["东方财富", "雪球", "招商证券", "电脑版"]);
 });
 
 test("可见长度不计HTML标签与链接地址，实体按一个字计", () => {
@@ -112,7 +112,7 @@ test("席位明细：营业部名称精简、金额紧凑、附手机版行情�
     assert.match(text, /📌 <b>日涨幅偏离7%<\/b>/);
     assert.match(text, /1\. 国泰海通证券武汉紫阳东路\n　买1\.22亿 卖4万 净\+1\.22亿/);
     assert.match(text, /href="https:\/\/mlink\.eastmoney\.com\/h52n\/nlink\.html\?type=localurl&amp;id=eastmoney%3A%2F%2Fpage%2Fstockpage%3Fcode%3D002249%26market%3D0">东方财富/);
-    assert.match(text, /href="https:\/\/m\.10jqka\.com\.cn\/stockpage\/hs_002249\/">同花顺/);
+    assert.match(text, /href="https:\/\/xueqiu\.com\/S\/SZ002249">雪球/);
     assert.match(text, /lhb,2026-10-27,002249\.html">电脑版龙虎榜详情/);
 });
 

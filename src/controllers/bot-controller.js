@@ -217,7 +217,7 @@ function createBotController({
         return reply(chatId, view.volumeSpikeToggledText(enabled));
     }
 
-    // /app 列出可选App（按钮选择），/app 同花顺 直接设置
+    // /app 列出可选App（按钮选择），/app 雪球 直接设置
     async function chooseQuoteApp(chatId, argument, subscriber) {
         const current = QuoteApp.forSubscriber(subscriber);
         if (!argument.trim()) return sendMessage(chatId, view.appChoiceText(current), { replyMarkup: view.appChoiceMarkup(current) });

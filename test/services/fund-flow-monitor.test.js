@@ -270,8 +270,8 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
         async sendPhoto() { throw new Error("不应发图"); },
         async sendMessage(chatId, text) { texts.push(text); }
     });
-    await fallback("100", new Set(), "tonghuashun");
+    await fallback("100", new Set(), "xueqiu");
     assert.match(texts[0], /主力加速流入/);
-    assert.match(texts[0], /m\.10jqka\.com\.cn\/stockpage\/hs_300308/);
-    assert.match(texts[0], /点股票名称打开同花顺/);
+    assert.match(texts[0], /xueqiu\.com\/S\/SZ300308/);
+    assert.match(texts[0], /点股票名称打开雪球/);
 });

@@ -64,7 +64,7 @@ const MESSAGES = {
     cannotBanAdmin: "不能拉黑管理员本人。",
     invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
     invalidSpikeArgument: "用法：<code>/spike</code> 切换，<code>/spike on</code> 开启，<code>/spike off</code> 关闭。",
-    invalidAppArgument: `可选：${QuoteApp.all.map(app => app.label).join("、")}。发送 <code>/app</code> 点按钮选择，或直接输入如 <code>/app 同花顺</code>。`,
+    invalidAppArgument: `可选：${QuoteApp.all.map(app => app.label).join("、")}。发送 <code>/app</code> 点按钮选择，或直接输入如 <code>/app 雪球</code>。`,
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
@@ -199,7 +199,7 @@ function volumeSpikeToggledText(enabled) {
 const APP_CALLBACK_PREFIX = "app:";
 
 function appChoiceText(current) {
-    return `点股票名称时打开哪个App？当前：<b>${escapeHtml(current.label)}</b>\n推送、自选股列表与每日总结网页里的股票链接都会改为所选App。`;
+    return `点股票名称时打开哪个App？当前：<b>${escapeHtml(current.label)}</b>\n推送、自选股列表与每日总结网页里的股票链接都会改为所选App。\n<i>招商证券会先打开一个网页再跳转App，跳转后可直接关闭该网页。</i>`;
 }
 
 function appChoiceMarkup(current) {

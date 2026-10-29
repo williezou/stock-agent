@@ -441,7 +441,7 @@ test("龙虎榜席位以表格图片发送，画图失败时退回文字", async
     await ok.controller.handleUpdate(privateMessage("/start lhb_002249_20261027"));
     assert.equal(ok.sent.photos.length, 1);
     assert.match(ok.sent.photos[0].caption, /大洋电机.*龙虎榜席位/);
-    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "雪球", "招商证券", "电脑版"]);
+    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["东方财富", "雪球", "招商证券", "电脑版"]);
     assert.deepEqual(ok.sent.texts, []);
 
     const broken = build(() => { throw new Error("未找到可用的中文字体"); });
@@ -541,7 +541,6 @@ test("/app 列出可选App并标出当前选择；按钮或参数切换后，回
     assert.match(sent.at(-1).text, /当前：<b>东方财富<\/b>/);
     assert.deepEqual(sent.at(-1).options.replyMarkup.inline_keyboard[0], [
         { text: "✅ 东方财富", callback_data: "app:eastmoney" },
-        { text: "同花顺", callback_data: "app:tonghuashun" },
         { text: "雪球", callback_data: "app:xueqiu" },
         { text: "招商证券", callback_data: "app:cmschina" }
     ]);
@@ -554,12 +553,12 @@ test("/app 列出可选App并标出当前选择；按钮或参数切换后，回
     assert.match(sent.at(-1).text, /<a href="https:\/\/xueqiu.com\/S\/SH600519">贵州茅台<\/a>/);
     assert.match(sent.at(-1).text, /点股票名称打开雪球/);
 
-    await controller.handleUpdate(privateMessage("/app 同花顺"));
-    assert.equal((await store.getSubscriber(100)).quote_app, "tonghuashun");
+    await controller.handleUpdate(privateMessage("/app 招商"));
+    assert.equal((await store.getSubscriber(100)).quote_app, "cmschina");
     await controller.handleUpdate(privateMessage("/add 600519"));
-    assert.match(sent.at(-1).text, /m\.10jqka\.com\.cn\/stockpage\/hs_600519/);
+    assert.match(sent.at(-1).text, /weixin\.newone\.com\.cn\/app\/share/);
 
     await controller.handleUpdate(privateMessage("/app 富途"));
-    assert.match(sent.at(-1).text, /可选：东方财富、同花顺、雪球、招商证券/);
-    assert.equal((await store.getSubscriber(100)).quote_app, "tonghuashun", "无法识别时不改");
+    assert.match(sent.at(-1).text, /可选：东方财富、雪球、招商证券/);
+    assert.equal((await store.getSubscriber(100)).quote_app, "cmschina", "无法识别时不改");
 });
