@@ -69,10 +69,12 @@ test("入口页按推送开关列出各段：关掉的提醒不出现；页面�
     assert.match(html, new RegExp(`data-src="http://pages.test/p/${token}/close.html"`));
     assert.match(html, /data-src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/intraday\.eastmoney\.html"/, "量价异动开着，回顾仍在；没选过App时用东方财富那份");
     assert.doesNotMatch(html, /longhu\.|hot-money\./, "龙虎榜关闭");
+    assert.match(html, /s\/[0-9a-f]{32}\/limit-up\.eastmoney\.html/, "涨停复盘默认开启");
 
-    await dailyPage.publishIndex({ chat_id: "200", fund_flow_enabled: false, volume_spike_enabled: false, quote_app: "xueqiu" }, "2026-10-28");
+    await dailyPage.publishIndex({ chat_id: "200", fund_flow_enabled: false, volume_spike_enabled: false, limit_up_enabled: false, quote_app: "xueqiu" }, "2026-10-28");
     const other = read(`p/${pageToken("200", "2026-10-28")}/index.html`);
     assert.doesNotMatch(other, /intraday\./, "两种盘中提醒都关了");
+    assert.doesNotMatch(other, /limit-up\./, "涨停复盘关闭");
     assert.match(other, /s\/[0-9a-f]{32}\/longhu\.xueqiu\.html[^]*s\/[0-9a-f]{32}\/hot-money\.xueqiu\.html/, "选了雪球，引用雪球那份");
 });
 
@@ -155,6 +157,9 @@ test("龙虎榜与游资写入共用目录，按App各写一份明细、图片�
     assert.match(read(`s/${sharedToken("2026-10-26")}/longhu.cmschina.html`), /weixin\.newone\.com\.cn/);
     await dailyPage.publishHotMoney({ date: "2026-10-26", content: { date: "2026-10-26", totalSeats: 0, seats: [], highWinSeats: [] }, render: () => { throw new Error("不应画图"); } });
     assert.doesNotMatch(read(`s/${sharedToken("2026-10-26")}/hot-money.eastmoney.html`), /<img /);
+    const limitUp = { date: "2026-10-26", limitUp: [{ symbol: "600000", name: "沪股", boards: 2, sealAmount: 1e8, industry: "银行", firstTime: "09:25", breaks: 0 }], limitDown: [], broken: [], yesterday: [], catalysts: {} };
+    await dailyPage.publishLimitUp({ date: "2026-10-26", content: limitUp, render: () => Buffer.from("png") });
+    assert.match(read(`s/${sharedToken("2026-10-26")}/limit-up.xueqiu.html`), /<img src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/limit-up.png"[^]*<a href="https:\/\/xueqiu.com\/S\/SH600000">沪股<\/a>/);
     await dailyPage.publishIntraday("2026-10-26", []);
     assert.match(read(`s/${sharedToken("2026-10-26")}/intraday.cmschina.html`), /今日没有盘中异动推送/);
 });

@@ -18,6 +18,8 @@ const SCHEMA = [
     "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS fund_flow_enabled BOOLEAN NOT NULL DEFAULT TRUE",
     // 盘中量价异动提醒（默认开启）
     "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS volume_spike_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    // 收盘后涨停复盘推送（默认开启）
+    "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS limit_up_enabled BOOLEAN NOT NULL DEFAULT TRUE",
     // 股票名称链接打开的行情App（/app 选择，见 QuoteApp）
     "ALTER TABLE telegram_subscribers ADD COLUMN IF NOT EXISTS quote_app TEXT NOT NULL DEFAULT 'eastmoney'",
     `CREATE TABLE IF NOT EXISTS watchlist (

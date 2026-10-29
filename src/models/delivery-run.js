@@ -4,11 +4,16 @@ const STALE_RUNNING = "45 minutes";
 
 function createDeliveryRunRepository(pool) {
     // 今天仍需投递的活跃订阅者：没有任务记录或任务可重领。
-    // audience：watchlist=有自选股的用户（收盘报告），longhu=开启龙虎榜推送的用户
+    // audience：watchlist=有自选股的用户（收盘报告），longhu=开启龙虎榜推送的用户，limitUp=开启涨停复盘的用户
+    const AUDIENCE_FILTERS = {
+        watchlist: "AND EXISTS (SELECT 1 FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE)",
+        longhu: "AND s.longhu_enabled = TRUE",
+        limitUp: "AND s.limit_up_enabled = TRUE"
+    };
+
     async function listDueSubscribers(jobName, runDate, maxAttempts = 12, { audience = "watchlist" } = {}) {
-        const audienceFilter = audience === "longhu"
-            ? "AND s.longhu_enabled = TRUE"
-            : "AND EXISTS (SELECT 1 FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE)";
+        const audienceFilter = AUDIENCE_FILTERS[audience];
+        if (!audienceFilter) throw new Error(`未知的推送对象：${audience}`);
         const result = await pool.query(
             `SELECT s.chat_id, s.telegram_user_id, s.username, s.first_name, s.timezone, s.quote_app
              FROM telegram_subscribers s

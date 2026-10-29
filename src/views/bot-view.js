@@ -14,6 +14,7 @@ const BOT_COMMANDS = [
     { command: "longhu", description: "开启/关闭龙虎榜与游资动向推送" },
     { command: "flow", description: "开启/关闭尾盘资金异动提醒" },
     { command: "spike", description: "开启/关闭盘中量价异动提醒" },
+    { command: "limit", description: "开启/关闭收盘涨停复盘推送" },
     { command: "app", description: "选择股票链接打开的行情App" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
@@ -33,7 +34,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = `点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒\n/app 选择点股票名称打开的App（${QuoteApp.all.map(app => app.label).join("/")}）`;
+const HELP_TEXT = `点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒\n/limit 开启/关闭收盘涨停复盘（连板梯队）\n/app 选择点股票名称打开的App（${QuoteApp.all.map(app => app.label).join("/")}）`;
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -65,6 +66,7 @@ const MESSAGES = {
     invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
     invalidSpikeArgument: "用法：<code>/spike</code> 切换，<code>/spike on</code> 开启，<code>/spike off</code> 关闭。",
     invalidAppArgument: `可选：${QuoteApp.all.map(app => app.label).join("、")}。发送 <code>/app</code> 点按钮选择，或直接输入如 <code>/app 雪球</code>。`,
+    invalidLimitArgument: "用法：<code>/limit</code> 切换，<code>/limit on</code> 开启，<code>/limit off</code> 关闭。",
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
@@ -93,7 +95,7 @@ function userBlock(user, index) {
     const name = user.first_name || user.username || user.chat_id;
     const handle = user.username ? `（@${user.username}）` : "";
     const watchlist = user.watchlist || [];
-    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关", user.volume_spike_enabled === false && "量价异动关"].filter(Boolean);
+    const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关", user.volume_spike_enabled === false && "量价异动关", user.limit_up_enabled === false && "涨停复盘关"].filter(Boolean);
     const app = QuoteApp.forSubscriber(user);
     if (app !== QuoteApp.DEFAULT) off.push(app.label);
     const lines = [
@@ -142,7 +144,7 @@ function usersMessages(users, maxSubscribers) {
     const inactive = users.filter(user => user.status !== "active" && user.status !== "banned");
     const blocks = [
         `<b>👥 订阅用户：启用 ${active.length}${maxSubscribers > 0 ? `/${maxSubscribers}` : ""}，停用 ${inactive.length}，拉黑 ${banned.length}</b>\n` +
-            `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人，开启量价异动 ${active.filter(user => user.volume_spike_enabled !== false).length} 人`
+            `开启龙虎榜 ${active.filter(user => user.longhu_enabled !== false).length} 人，开启资金异动 ${active.filter(user => user.fund_flow_enabled !== false).length} 人，开启量价异动 ${active.filter(user => user.volume_spike_enabled !== false).length} 人，开启涨停复盘 ${active.filter(user => user.limit_up_enabled !== false).length} 人`
     ];
     const summary = watchlistSummary(active);
     if (summary.length) {
@@ -222,6 +224,12 @@ function appChangedText(app) {
     return `✅ 已改为点股票名称打开<b>${escapeHtml(app.label)}</b>，之后的推送与回复都按此生成链接。发送 /app 可再次更改。`;
 }
 
+function limitUpToggledText(enabled) {
+    return enabled
+        ? "✅ 已开启涨停复盘：交易日收盘后（约15:10）推送涨跌停与炸板家数、封板率、连板梯队及连板股相关公告/新闻。发送 /limit off 可关闭。"
+        : "已关闭涨停复盘推送，其他推送不受影响。发送 /limit on 可重新开启。";
+}
+
 function subscriberLabel(subscriber) {
     const name = subscriber.first_name || subscriber.username || subscriber.chat_id;
     const handle = subscriber.username ? `（@${subscriber.username}）` : "";
@@ -286,6 +294,7 @@ module.exports = {
     confirmRemoveMarkup,
     confirmRemoveText,
     fundFlowToggledText,
+    limitUpToggledText,
     longhuToggledText,
     volumeSpikeToggledText,
     removeChoicesMarkup,

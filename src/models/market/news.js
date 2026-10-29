@@ -1,11 +1,14 @@
 const { config } = require("../../config");
 const { delay, runPool } = require("../../lib/async");
-const { formatError } = require("../../lib/http");
+const { BROWSER_USER_AGENT, formatError } = require("../../lib/http");
 
 const EM_NEWS_URL = "https://so.eastmoney.com/news/s";
 const EM_F10_NEWS_URL = "https://emweb.securities.eastmoney.com/PC_HSF10/CompanyNewsAjax";
 const EM_F10_NOTICE_URL = "https://emweb.securities.eastmoney.com/PC_HSF10/CompanyNoticeAjax";
 const EM_DC_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get";
+// 2026-10 起 F10 接口 302 跳走、数据中心公告报表下线；改用东财公告列表与资讯搜索接口（均有IPv6），旧接口留作回退
+const EM_ANNOUNCEMENT_URL = "https://np-anotice-stock.eastmoney.com/api/security/ann";
+const EM_SEARCH_URL = "https://search-api-web.eastmoney.com/search/jsonp";
 
 const NEWSNOW_SOURCES = [
     "wallstreetcn-quick",
@@ -149,6 +152,31 @@ function normalizeNoticeItem(item) {
     };
 }
 
+// 东财公告列表：{ data: { list: [{ art_code, title, title_ch, notice_date }] } }
+function parseAnnouncementList(data, symbol) {
+    const list = (data && data.data && data.data.list) || [];
+    return list.map(item => ({
+        title: item.title_ch || item.title || "",
+        date: String(item.notice_date || item.display_time || "").slice(0, 10),
+        url: item.art_code ? `https://data.eastmoney.com/notices/detail/${symbol}/${item.art_code}.html` : ""
+    })).filter(item => item.title);
+}
+
+// 东财资讯搜索（JSONP）：{ result: { cmsArticleWebOld: [{ title, date, url, content, mediaName }] } }；标题里可能带高亮标签
+function parseSearchNews(text) {
+    const body = String(text || "");
+    const json = JSON.parse(body.slice(body.indexOf("(") + 1, body.lastIndexOf(")")));
+    const list = (json.result && json.result.cmsArticleWebOld) || [];
+    const plain = value => decodeHtml(String(value || "").replace(/<[^>]+>/g, "")).trim();
+    return list.map(item => ({
+        title: plain(item.title),
+        time: String(item.date || "").slice(0, 19),
+        url: item.url || "",
+        content: plain(item.content),
+        source: item.mediaName || ""
+    })).filter(item => item.title);
+}
+
 function sourceFromUrl(url) {
     if (!url) return "";
     try {
@@ -171,7 +199,7 @@ function mergeNewsLists(a, b) {
     return out;
 }
 
-// 个股新闻与公告：东方财富F10接口优先，失败时回退搜索页/数据中心；另聚合NewsNow快讯按代码/名称匹配
+// 个股新闻与公告：东方财富资讯搜索/公告列表优先，失败或为空时回退F10接口、搜索页/数据中心；另聚合NewsNow快讯按代码/名称匹配
 function createNewsService({ httpClient, requestWithRetry }) {
     async function fetchNewsNowSource(id) {
         const res = await requestWithRetry(() =>
@@ -245,8 +273,36 @@ function createNewsService({ httpClient, requestWithRetry }) {
         return index;
     }
 
+    // 东财资讯搜索：sort 为 time（最新）或 default（相关度）
+    async function searchNews(keyword, { sort = "time", pageSize = 5 } = {}) {
+        const param = {
+            uid: "",
+            keyword,
+            type: ["cmsArticleWebOld"],
+            client: "web",
+            clientType: "web",
+            clientVersion: "curr",
+            param: { cmsArticleWebOld: { searchScope: "default", sort, pageIndex: 1, pageSize, preTag: "", postTag: "" } }
+        };
+        const res = await requestWithRetry(() =>
+            httpClient.get(EM_SEARCH_URL, {
+                params: { cb: "cb", param: JSON.stringify(param) },
+                headers: { "User-Agent": BROWSER_USER_AGENT, "Referer": "https://so.eastmoney.com/" },
+                responseType: "text"
+            })
+        );
+        return parseSearchNews(res.data);
+    }
+
     async function getNews(symbol) {
         const emCode = toEmCode(symbol);
+
+        try {
+            const items = await searchNews(symbol);
+            if (items.length) return items;
+        } catch (e) {
+            // fallback
+        }
 
         // ① 优先走 F10 JSON 接口
         try {
@@ -341,6 +397,19 @@ function createNewsService({ httpClient, requestWithRetry }) {
     async function getAnnouncements(symbol) {
         const emCode = toEmCode(symbol);
 
+        try {
+            const res = await requestWithRetry(() =>
+                httpClient.get(EM_ANNOUNCEMENT_URL, {
+                    params: { sr: -1, page_size: 5, page_index: 1, ann_type: "A", client_source: "web", stock_list: symbol },
+                    headers: { "User-Agent": BROWSER_USER_AGENT, "Referer": "https://data.eastmoney.com/" }
+                })
+            );
+            const items = parseAnnouncementList(res.data, symbol);
+            if (items.length) return items;
+        } catch (e) {
+            // fallback
+        }
+
         // ① 优先走 F10 JSON 接口
         try {
             const fetchF10 = async code =>
@@ -421,6 +490,7 @@ function createNewsService({ httpClient, requestWithRetry }) {
     return {
         getNews,
         getAnnouncements,
+        searchNews,
         buildNewsNowIndex,
         mergeNewsLists,
         sourceFromUrl
@@ -428,4 +498,4 @@ function createNewsService({ httpClient, requestWithRetry }) {
 }
 
 // 合并新闻列表时按“链接+标题”去重
-module.exports = { createNewsService, mergeNewsLists };
+module.exports = { createNewsService, mergeNewsLists, parseAnnouncementList, parseSearchNews };

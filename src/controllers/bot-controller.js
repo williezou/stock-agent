@@ -217,6 +217,14 @@ function createBotController({
         return reply(chatId, view.volumeSpikeToggledText(enabled));
     }
 
+    // /limit 切换，/limit on|off 显式设置
+    async function setLimitUpPush(chatId, argument, subscriber) {
+        const enabled = parseToggle(argument, subscriber.limit_up_enabled);
+        if (enabled === null) return reply(chatId, MESSAGES.invalidLimitArgument);
+        await store.setLimitUpEnabled(chatId, enabled);
+        return reply(chatId, view.limitUpToggledText(enabled));
+    }
+
     // /app 列出可选App（按钮选择），/app 雪球 直接设置
     async function chooseQuoteApp(chatId, argument, subscriber) {
         const current = QuoteApp.forSubscriber(subscriber);
@@ -324,6 +332,8 @@ function createBotController({
         if (flowArgument !== null) return setFundFlowPush(chatId, flowArgument, subscriber);
         const spikeArgument = commandArgument(text, "spike");
         if (spikeArgument !== null) return setVolumeSpikePush(chatId, spikeArgument, subscriber);
+        const limitArgument = commandArgument(text, "limit");
+        if (limitArgument !== null) return setLimitUpPush(chatId, limitArgument, subscriber);
         const appArgument = commandArgument(text, "app");
         if (appArgument !== null) return chooseQuoteApp(chatId, appArgument, subscriber);
 

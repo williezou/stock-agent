@@ -13,7 +13,7 @@ function createSubscriberRepository(pool) {
                 first_name = COALESCE(EXCLUDED.first_name, telegram_subscribers.first_name),
                 status = 'active',
                 updated_at = NOW()
-             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled, quote_app`,
+             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled, limit_up_enabled, quote_app`,
             [
                 String(chatId),
                 userId === undefined || userId === null ? null : String(userId),
@@ -25,7 +25,7 @@ function createSubscriberRepository(pool) {
 
     async function getSubscriber(chatId) {
         const result = await pool.query(
-            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled, quote_app
+            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled, limit_up_enabled, quote_app
              FROM telegram_subscribers WHERE chat_id = $1`,
             [String(chatId)]
         );
@@ -103,6 +103,14 @@ function createSubscriberRepository(pool) {
         return result.rows;
     }
 
+    async function setLimitUpEnabled(chatId, enabled) {
+        const result = await pool.query(
+            "UPDATE telegram_subscribers SET limit_up_enabled = $2, updated_at = NOW() WHERE chat_id = $1",
+            [String(chatId), Boolean(enabled)]
+        );
+        return result.rowCount > 0;
+    }
+
     // /app：股票名称链接打开的行情App
     async function setQuoteApp(chatId, appKey) {
         const result = await pool.query(
@@ -148,7 +156,7 @@ function createSubscriberRepository(pool) {
     // 管理员 /users：全部订阅者及其推送开关、启用中的自选股（按添加顺序），按注册时间排序
     async function listSubscriberSummaries() {
         const result = await pool.query(
-            `SELECT s.chat_id, s.username, s.first_name, s.status, s.longhu_enabled, s.fund_flow_enabled, s.volume_spike_enabled, s.quote_app,
+            `SELECT s.chat_id, s.username, s.first_name, s.status, s.longhu_enabled, s.fund_flow_enabled, s.volume_spike_enabled, s.limit_up_enabled, s.quote_app,
                     to_char(s.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS created_date,
                     COALESCE((SELECT json_agg(json_build_object('symbol', w.symbol, 'name', w.name) ORDER BY w.created_at, w.symbol)
                               FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE), '[]'::json) AS watchlist
@@ -179,6 +187,7 @@ function createSubscriberRepository(pool) {
         registerSubscriber,
         setFundFlowEnabled,
         setSubscriberBanned,
+        setLimitUpEnabled,
         setLonghuEnabled,
         setQuoteApp,
         setVolumeSpikeEnabled,

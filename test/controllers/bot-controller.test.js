@@ -62,6 +62,12 @@ function createMemoryStore(initial = [], registered = true) {
             subscriber.volume_spike_enabled = enabled;
             return true;
         },
+        async setLimitUpEnabled(chatId, enabled) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.limit_up_enabled = enabled;
+            return true;
+        },
         async setQuoteApp(chatId, appKey) {
             const subscriber = subscribers.get(String(chatId));
             if (!subscriber) return false;
@@ -561,4 +567,16 @@ test("/app 列出可选App并标出当前选择；按钮或参数切换后，回
     await controller.handleUpdate(privateMessage("/app 富途"));
     assert.match(sent.at(-1).text, /可选：东方财富、雪球、招商证券/);
     assert.equal((await store.getSubscriber(100)).quote_app, "cmschina", "无法识别时不改");
+});
+
+test("/limit 单独切换涨停复盘推送", async () => {
+    const { controller, sent, store } = setup();
+    await controller.handleUpdate(privateMessage("/limit"));
+    assert.equal((await store.getSubscriber(100)).limit_up_enabled, false, "默认开启，首次切换为关闭");
+    assert.match(sent.at(-1).text, /已关闭涨停复盘推送/);
+    await controller.handleUpdate(privateMessage("/limit on"));
+    assert.equal((await store.getSubscriber(100)).limit_up_enabled, true);
+    assert.match(sent.at(-1).text, /已开启涨停复盘/);
+    await controller.handleUpdate(privateMessage("/limit maybe"));
+    assert.match(sent.at(-1).text, /\/limit on/);
 });

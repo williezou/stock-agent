@@ -1,6 +1,7 @@
 const { escapeHtml, linkLine, money, number, signed } = require("./format");
 const { deltaText, signedAmount } = require("./fund-flow-view");
 const { formatHotMoneyText, seatLabel } = require("./hot-money-view");
+const { NOTE: LIMIT_UP_NOTE, countsText, industriesText, summarizeLimitUp, yesterdayText } = require("./limit-up-view");
 const { formatLonghuMessage } = require("./longhu-view");
 const { StockLink } = require("./stock-link");
 
@@ -30,6 +31,8 @@ th, td { padding: 8px 4px; text-align: right; border-bottom: 1px solid var(--lin
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--muted); font-weight: normal; font-size: 13px; }
 tr:last-child td { border-bottom: none; }
+tr.has-sub td { border-bottom: none; padding-bottom: 2px; }
+tr.sub td { text-align: left; white-space: normal; color: var(--muted); font-size: 13px; padding-top: 0; }
 .up { color: var(--up); } .down { color: var(--down); }
 .stock-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .stock-head a { font-size: 18px; font-weight: 600; }
@@ -200,6 +203,48 @@ function hotMoneyFragment({ content, chartUrl, app }) {
     return chartWithDetails(chartUrl, "游资动向", "游资明细", withoutNotes(formatHotMoneyText(content, { app })));
 }
 
+// 涨停复盘：概况 + 梯队图 + 各连板层级明细（附相关公告/新闻）+ 首板按行业分组；跌停与炸板收在详情里
+function limitUpLevelCard(level, { app, catalysts }) {
+    const rows = level.stocks.map(stock => {
+        const catalyst = catalysts && catalysts[stock.symbol];
+        const row = `<tr${catalyst ? ' class="has-sub"' : ""}><td>${stockCell(stock, app)}</td><td>${escapeHtml(stock.industry)}</td><td>${stock.firstTime}</td><td>${stock.breaks || "—"}</td><td>${signedAmount(stock.sealAmount).replace(/^\+/, "")}</td></tr>`;
+        return catalyst ? `${row}<tr class="sub"><td colspan="5">📰 ${linkLine(catalyst)}</td></tr>` : row;
+    });
+    return listCard(`${level.boards}连板（${level.stocks.length}只）`, ["名称", "行业", "首封", "炸板", "封单"], rows);
+}
+
+function firstBoardCard(firstBoard, app) {
+    const groups = new Map();
+    for (const stock of firstBoard) {
+        const key = stock.industry || "其他";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(stock);
+    }
+    const lines = [...groups.entries()]
+        .sort((a, b) => b[1].length - a[1].length)
+        .map(([industry, stocks]) => `<b>${escapeHtml(industry)}</b>（${stocks.length}）：${stocks.map(stock => stockCell(stock, app)).join("、")}`);
+    return card(`<b>首板 ${firstBoard.length}只（按行业）</b><div class="tg">${lines.join("\n")}</div>`);
+}
+
+function collapsedList(title, head, rows) {
+    if (!rows.length) return "";
+    return card(`<details><summary>${title}</summary><table><thead><tr>${head.map(text => `<th>${text}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></details>`);
+}
+
+function limitUpFragment({ content, chartUrl, app }) {
+    const summary = summarizeLimitUp(content);
+    const head = [countsText(summary), yesterdayText(summary), industriesText(summary)].filter(Boolean).map(escapeHtml).join("<br>");
+    const parts = [card(`${head}${chartImage(chartUrl, "涨停复盘")}`)];
+    parts.push(...summary.ladder.map(level => limitUpLevelCard(level, { app, catalysts: content.catalysts })));
+    if (summary.firstBoard.length) parts.push(firstBoardCard(summary.firstBoard, app));
+    parts.push(collapsedList(`跌停 ${content.limitDown.length}只`, ["名称", "行业", "连跌", "开板"],
+        content.limitDown.map(stock => `<tr><td>${stockCell(stock, app)}</td><td>${escapeHtml(stock.industry)}</td><td>${stock.days}天</td><td>${stock.opens}次</td></tr>`)));
+    parts.push(collapsedList(`炸板 ${content.broken.length}只`, ["名称", "行业", "首封", "炸板", "收盘"],
+        content.broken.map(stock => `<tr><td>${stockCell(stock, app)}</td><td>${escapeHtml(stock.industry)}</td><td>${stock.firstTime}</td><td>${stock.breaks}次</td>${pctCell(stock.changePct)}</tr>`)));
+    parts.push(`<p class="note">${escapeHtml(LIMIT_UP_NOTE)}。</p>`);
+    return parts.filter(Boolean).join("\n");
+}
+
 // 推送消息下方打开网页的按钮
 function dailyPageButton(url) {
     return { inline_keyboard: [[{ text: "📄 打开今日总结", url }]] };
@@ -231,5 +276,6 @@ module.exports = {
     dailyPageHtml,
     hotMoneyFragment,
     intradayFragment,
+    limitUpFragment,
     longhuFragment
 };

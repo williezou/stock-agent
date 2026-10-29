@@ -49,6 +49,9 @@ async function publishIndex(subscriber, date) {
     const chatId = subscriber.chat_id;
     const app = QuoteApp.forSubscriber(subscriber);
     const sections = [{ id: "close", title: "📊 自选股收盘", url: publicUrl(paths.close(chatId, date)), pending: "收盘报告约15:30后生成（自选股为空时没有）" }];
+    if (subscriber.limit_up_enabled !== false) {
+        sections.push({ id: "limit-up", title: "🔥 涨停复盘", url: publicUrl(paths.sharedHtml(date, "limit-up", app)), pending: "收盘后约15:10生成" });
+    }
     if (subscriber.fund_flow_enabled !== false || subscriber.volume_spike_enabled !== false) {
         sections.push({ id: "intraday", title: "⚡ 盘中异动回顾", url: publicUrl(paths.sharedHtml(date, "intraday", app)), pending: "收盘后汇总" });
     }
@@ -106,7 +109,12 @@ async function publishHotMoney({ date, content, render }) {
     await putSharedHtml(date, "hot-money", app => view.hotMoneyFragment({ content, chartUrl, app }));
 }
 
-const dailyPage = { pageUrl, publishClose, publishHotMoney, publishIndex, publishIntraday, publishLonghu };
+async function publishLimitUp({ date, content, render }) {
+    const chartUrl = content.limitUp.length ? await putChart(paths.shared(date, "limit-up.png"), () => render(content)) : null;
+    await putSharedHtml(date, "limit-up", app => view.limitUpFragment({ content, chartUrl, app }));
+}
+
+const dailyPage = { pageUrl, publishClose, publishHotMoney, publishIndex, publishIntraday, publishLimitUp, publishLonghu };
 
 // 控制器取用：测试注入 services.dailyPage；未配置时为 null，按原方式逐条推送
 function resolveDailyPage(services = {}) {
