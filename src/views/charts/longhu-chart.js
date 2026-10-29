@@ -15,14 +15,15 @@ const BAR_MAX_WIDTH = 440;
 const NAME_LEFT = PADDING + 56;
 const DETAIL_MAX_WIDTH = BAR_LEFT - NAME_LEFT - 20; // 第二行（代码+上榜原因）不得压到条形图
 
+// 浅色主题（与排行图一致）
 const COLORS = {
-    background: "#0a1220",
-    panel: "#111d31",
-    grid: "#2b394e",
-    text: "#e2e8f0",
-    muted: "#8b97ab",
-    up: "#f55252",
-    down: "#22c55e"
+    background: "#ffffff",
+    panel: "#f4f6f9",
+    grid: "#e2e8f0",
+    text: "#1e293b",
+    muted: "#64748b",
+    up: "#e03131",
+    down: "#16a34a"
 };
 
 function changeColor(changePct) {

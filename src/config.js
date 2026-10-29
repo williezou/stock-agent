@@ -55,6 +55,18 @@ const config = {
         get minAmount() { return positiveNumber(env.VOLUME_SPIKE_MIN_AMOUNT_WAN, 5000) * 10000; },
         get minChangePct() { return positiveNumber(env.VOLUME_SPIKE_MIN_CHANGE_PCT, 2); }
     },
+    // 每日总结网页：收盘报告、盘中异动回顾、龙虎榜与游资动向汇总到一个网页（地址含按用户与日期生成的随机令牌）。
+    // 托管在GCS（DAILY_PAGE_BUCKET），或本地调试时写入目录（DAILY_PAGE_DIR，由静态服务对外提供；
+    // DAILY_PAGE_BASE_URL 为其地址，不填时页面内用根路径引用）；
+    // 未配置时仍按原方式逐条推送图片
+    dailyPage: {
+        get bucket() { return env.DAILY_PAGE_BUCKET || ""; },
+        get dir() { return env.DAILY_PAGE_DIR || ""; },
+        get baseUrl() { return (env.DAILY_PAGE_BASE_URL || "").replace(/\/$/, ""); },
+        get secret() { return env.DAILY_PAGE_SECRET || ""; },
+        get accessToken() { return env.GCS_ACCESS_TOKEN || ""; },
+        get enabled() { return Boolean(this.secret && (this.bucket || this.dir)); }
+    },
     get debug() { return env.DEBUG === "1" || env.DEBUG === "true"; }
 };
 

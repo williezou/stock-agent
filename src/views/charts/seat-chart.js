@@ -24,16 +24,17 @@ const COLUMNS = {
     net: WIDTH - PADDING - 16
 };
 
+// 浅色主题（与排行图一致）
 const COLORS = {
-    background: "#0a1220",
-    panel: "#111d31",
-    head: "#1b2a42",
-    grid: "#2b394e",
-    text: "#e2e8f0",
-    muted: "#8b97ab",
-    up: "#f55252",
-    down: "#22c55e",
-    accent: "#facc15"
+    background: "#ffffff",
+    panel: "#f4f6f9",
+    head: "#e8edf3",
+    grid: "#e2e8f0",
+    text: "#1e293b",
+    muted: "#64748b",
+    up: "#e03131",
+    down: "#16a34a",
+    accent: "#d97706"
 };
 
 function signColor(value) {

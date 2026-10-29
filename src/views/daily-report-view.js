@@ -27,7 +27,7 @@ function formatStockCaption(report, date) {
         `${StockLink.of(meta).html({ bold: true, code: false })} <code>${escapeHtml(meta.exchangeCode)}</code>｜${escapeHtml(date)}`,
         `💰 收 ${number(latest.close)}元 ${signed(latest.changePct)}｜开/高/低 ${number(latest.open)}/${number(latest.high)}/${number(latest.low)}`,
         `📊 成交额 ${money(latest.amount)}｜换手 ${number(latest.turnover)}%｜5日量比 ${number(analysis.volumeRatio)}x`,
-        `🟥涨K　🟩跌K　🟨MA5　🟦MA20　🟢支撑　🔴压力`,
+        `🟥涨K　🟩跌K　🟧MA5　🟦MA20　🟢支撑　🔴压力`,
         `📐 MA5/10/20/60 ${number(ma.ma5)}/${number(ma.ma10)}/${number(ma.ma20)}/${number(ma.ma60)}`,
         `⚡ MACD ${number(macd && macd.dif, 3)}/${number(macd && macd.dea, 3)}/${number(macd && macd.histogram, 3)}｜RSI ${number(rsi, 1)}｜K/D/J ${number(kdj && kdj.k, 1)}/${number(kdj && kdj.d, 1)}/${number(kdj && kdj.j, 1)}`,
         `〽️ BOLL 下/中/上 ${number(bollinger && bollinger.lower)}/${number(bollinger && bollinger.middle)}/${number(bollinger && bollinger.upper)}`,
@@ -57,7 +57,7 @@ function formatOverviewCaption(reports, date) {
     return [
         `<b>A股每日收盘图览｜${escapeHtml(date)}</b>`,
         ...reports.map(formatOverviewRow),
-        "红涨、绿跌；黄色MA5；下方为成交量；虚线为支撑与压力。"
+        "红涨、绿跌；橙色MA5；下方为成交量；虚线为支撑与压力。"
     ].join("\n");
 }
 

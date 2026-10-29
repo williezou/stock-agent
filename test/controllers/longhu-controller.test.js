@@ -185,3 +185,26 @@ test("图片下方按钮只放股票名称（回调按钮），净买入在前�
     assert.doesNotMatch(calls.photos[0].caption, /<a /, "说明里不再堆叠链接");
     assert.deepEqual(calls.photos[1].keyboard, calls.photos[0].keyboard, "复用file_id时按钮一并发送");
 });
+
+test("每日总结网页：榜单写入网页后只更新各用户的入口页，不单独推送；网页写入失败时照常推图", async () => {
+    const { calls, services, store } = setup({ boards: [FULL_BOARD] });
+    const published = { longhu: [], indexes: [] };
+    store.getSubscriber = async chatId => ({ chat_id: chatId, longhu_enabled: true });
+    services.dailyPage = {
+        async publishLonghu({ date, board, botUsername, render }) {
+            published.longhu.push({ date, count: board.length, botUsername, png: render({ date, board }).toString() });
+        },
+        async publishIndex(subscriber, date) { published.indexes.push([subscriber.chat_id, date]); }
+    };
+    const outcome = await runLonghuTick(store, at("20:20"), services);
+    assert.equal(outcome.format, "page");
+    assert.deepEqual(published.longhu, [{ date: "2026-10-27", count: 2, botUsername: "stock_test_bot", png: "png" }]);
+    assert.deepEqual(published.indexes, [["100", "2026-10-27"], ["200", "2026-10-27"]]);
+    assert.deepEqual(calls.sent, [], "第二条推送由游资动向发");
+    assert.deepEqual(calls.completed.map(c => c.status), ["done", "done"]);
+
+    const broken = setup({ boards: [FULL_BOARD] });
+    broken.services.dailyPage = { async publishLonghu() { throw new Error("storage down"); } };
+    assert.equal((await runLonghuTick(broken.store, at("20:20"), broken.services)).format, "chart");
+    assert.deepEqual(broken.calls.photos.map(p => p.chatId), ["100", "200"]);
+});

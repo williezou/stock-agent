@@ -3,9 +3,11 @@ const telegram = require("../gateways/telegram");
 const { defaultSourceNames } = require("../models/market/market-data");
 const { getChinaClock, isWeekdayWindow, minutesOfDay } = require("../models/market/trading-calendar");
 const { alertAdmin, sentAlerts } = require("../services/admin-alert");
+const { resolveDailyPage } = require("../services/daily-page");
 const { buildReports } = require("../services/daily-report");
 const { deliverDailyClose } = require("../services/report-delivery");
 const { sendAndRecord } = require("../services/tracked-delivery");
+const { closeMessage, dailyPageButton } = require("../views/daily-page-view");
 const { StockLink } = require("../views/stock-link");
 
 // 每日收盘调度控制器：工作日北京时间15:30-18:00轮询，为每个订阅者领取并投递当日报告
@@ -119,6 +121,27 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
         return { action: retry ? "retry" : "skipped", recipients: recipients.length, reason: result.reason };
     }
 
+    // 每日总结网页：先写盘中异动回顾（所有用户共用），每个用户写自己的收盘内容后只推一条概况+按钮；
+    // 网页写入失败时该用户退回逐条推送图片
+    const page = resolveDailyPage(services);
+    if (page && typeof store.listFundFlowAlerts === "function") {
+        await store.listFundFlowAlerts(dateStr)
+            .then(alerts => page.publishIntraday(dateStr, alerts))
+            .catch(error => console.error(`⚠️ 盘中异动回顾写入失败：${error.message}`));
+    }
+    async function deliverReports(chatId, reports) {
+        if (page) {
+            let url = null;
+            try {
+                url = await page.publishClose(await store.getSubscriber(chatId), { reports, date: dateStr });
+            } catch (error) {
+                console.error(`⚠️ ${chatId}的每日总结网页写入失败，改为逐条推送：${error.message}`);
+            }
+            if (url) return notify(chatId, closeMessage({ reports, date: result.date }), { replyMarkup: dailyPageButton(url) });
+        }
+        return deliver({ chatId, reports, date: result.date });
+    }
+
     const reportBySymbol = new Map(result.reports.map(report => [report.meta.symbol, report]));
     const totals = { delivered: 0, retried: 0, skipped: 0, failed: 0, deactivated: 0 };
     for (const recipient of recipients) {
@@ -161,7 +184,7 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             jobName: JOB_NAME,
             chatId,
             runDate: dateStr,
-            send: () => deliver({ chatId, reports, date: result.date }),
+            send: () => deliverReports(chatId, reports),
             doneMessage: missing.length ? `部分发送，缺少：${missing.map(target => target.symbol).join(",")}` : result.date
         });
         if (outcome !== "delivered") return outcome;

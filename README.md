@@ -13,6 +13,7 @@ A-share stock scanner with multi-style rankings, Telegram notifications, and a m
 - Intraday fund-flow alerts (default tail session 14:30-15:00): polls both ends of Eastmoney's main-force net inflow ranking (100 each) every minute, falling back to Sina Finance (and re-taking the baseline) when Eastmoney is unavailable, and pushes stocks whose net inflow changed by at least 50M CNY and 2% of the day's turnover since the window began; watchlist stocks are starred, windows are configurable, toggle with `/flow`. Main-force inflow is the data vendor's estimate, not official exchange data; the push names the source
 - Close reports are stored per date and stock, so subscribers tracking the same stock on the same day reuse one report instead of refetching quotes and news; fund-flow push records and monitor state (restored after a restart) and sent admin alerts (no repeats after a restart) are stored too. All of these, like the daily K-line cache, are kept for 7 days and pruned daily by the scheduler
 - Intraday volume-spike alerts (default 9:30-11:30 and 13:00-14:57): a full-market snapshot every minute (Shanghai from the SSE's official quotes in one request; Shenzhen has no bulk real-time exchange feed, so Sina Finance, about 30 pages), flagging stocks that traded at least 50M CNY and moved at least 2 percentage points in the last 5 minutes and pushing them in a batch every 10 minutes (plus once at the end of each window), once per stock and direction per day; toggle with `/spike`
+- Daily summary page (enabled by `DAILY_PAGE_BUCKET` and `DAILY_PAGE_SECRET`): the watchlist close report (overview table plus each stock's K-line, trade plan and catalyst, with indicators collapsible), an intraday recap (the day's volume-spike and fund-flow alerts merged into lists), the Dragon-Tiger list and hot-money moves go into one page per user per day, hosted on GCS under a token derived from the user and date. Only two messages are pushed per day: the close summary with a page button, and an "updated" notice once the Dragon-Tiger list and hot money are on the page. If writing the page fails, that delivery falls back to the per-image pushes
 - Stock names in pushes open the stock page in the Eastmoney app directly (iOS universal link); codes can be tapped to copy
 - MA/MACD/RSI/KDJ/Bollinger, volume-price, support/resistance, catalysts, and conditional trade plans
 - Telegram delivery includes a two-stock dashboard plus 30-day candlestick/volume charts with MA5/MA20, Bollinger bands, and support/resistance overlays
@@ -51,6 +52,8 @@ VOLUME_SPIKE_LOOKBACK_MINUTES=5 # optional
 VOLUME_SPIKE_MIN_AMOUNT_WAN=5000 # optional; turnover within the lookback (10k CNY)
 VOLUME_SPIKE_MIN_CHANGE_PCT=2 # optional; change in percent change within the lookback (percentage points)
 VOLUME_SPIKE_PUSH_MINUTES=10 # optional; spikes are batched and pushed every N minutes
+DAILY_PAGE_BUCKET=your-bucket # optional; public GCS bucket for the daily summary page
+DAILY_PAGE_SECRET=long-random-string # optional; derives the unguessable per-user page token
 ```
 
 > `FINNHUB_API_KEY` is no longer used but can be kept empty.

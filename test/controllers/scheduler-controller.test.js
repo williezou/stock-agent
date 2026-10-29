@@ -198,3 +198,43 @@ test("管理员告警去重记录可存库（异步 has/add）：重启后同一
     await alertAdmin({ ...context, alerted: broken }, { key: "2026-10-28:fallback", text: "备用源也失败" });
     assert.deepEqual(sent, ["东财异常", "备用源也失败"]);
 });
+
+test("每日总结网页：先写盘中异动回顾，每人写自己的收盘内容后只推一条概况+按钮；网页写入失败的用户退回逐条推图", async () => {
+    const report = symbol => ({
+        meta: { symbol, name: `股${symbol}` },
+        analysis: { latest: { close: 10, changePct: 1 } },
+        plan: { recommendation: "观望" }
+    });
+    const calls = { intraday: [], published: [], messages: [], fallback: [], completed: [] };
+    const store = {
+        async listDueSubscribers() { return [{ chat_id: "100" }, { chat_id: "200" }]; },
+        async list() { return [{ symbol: "600887", name: "伊利股份" }]; },
+        async getSubscriber(chatId) { return { chat_id: chatId, longhu_enabled: true }; },
+        async listFundFlowAlerts(date) { return [{ label: "尾盘", date }]; },
+        async claimDeliveryRun() { return 1; },
+        async completeDeliveryRun(_job, chatId, _date, status) { calls.completed.push({ chatId, status }); },
+        async failDeliveryRun() { throw new Error("不应重试"); },
+        async deactivateSubscriber() {}
+    };
+    const outcome = await runSchedulerTick(store, new Date("2026-10-27T07:30:00.000Z"), {
+        async buildReports() { return { skipped: false, date: "2026-10-27", reports: [report("600887")] }; },
+        dailyPage: {
+            async publishIntraday(date, alerts) { calls.intraday.push({ date, alerts }); },
+            async publishClose(subscriber, { reports, date }) {
+                if (subscriber.chat_id === "200") throw new Error("storage down");
+                calls.published.push({ chatId: subscriber.chat_id, date, symbols: reports.map(item => item.meta.symbol) });
+                return `https://pages.test/p/${subscriber.chat_id}/index.html`;
+            }
+        },
+        async deliverDailyClose({ chatId }) { calls.fallback.push(chatId); },
+        async sendMessage(chatId, text, options) { calls.messages.push({ chatId, text, options }); }
+    });
+    assert.deepEqual(calls.intraday, [{ date: "2026-10-27", alerts: [{ label: "尾盘", date: "2026-10-27" }] }]);
+    assert.deepEqual(calls.published, [{ chatId: "100", date: "2026-10-27", symbols: ["600887"] }]);
+    assert.equal(calls.messages.length, 1);
+    assert.match(calls.messages[0].text, /📊 每日收盘总结｜2026-10-27[^]*股600887/);
+    assert.deepEqual(calls.messages[0].options.replyMarkup.inline_keyboard[0][0], { text: "📄 打开今日总结", url: "https://pages.test/p/100/index.html" });
+    assert.deepEqual(calls.fallback, ["200"]);
+    assert.deepEqual(calls.completed.map(item => item.status), ["done", "done"]);
+    assert.equal(outcome.delivered, 2);
+});

@@ -5,6 +5,7 @@ const { createHttpClient, formatError, requestWithRetry } = require("../lib/http
 const { createLonghuService } = require("../models/market/longhu");
 const { getChinaClock, isTradingDay, isWeekdayWindow, minutesOfDay } = require("../models/market/trading-calendar");
 const { alertAdmin } = require("../services/admin-alert");
+const { resolveDailyPage } = require("../services/daily-page");
 const { sendAndRecord } = require("../services/tracked-delivery");
 const { generateLonghuChart } = require("../views/charts/longhu-chart");
 const { formatLonghuCaption, formatLonghuKeyboard, formatLonghuMessage } = require("../views/longhu-view");
@@ -199,14 +200,28 @@ async function runLonghuTick(store, now = new Date(), services = {}) {
         return { action: "skipped", reason: "龙虎榜未发布" };
     }
 
+    const getBotUsername = services.botUsername !== undefined ? async () => services.botUsername : resolveBotUsername;
+    const render = services.renderChart || generateLonghuChart;
     const content = await buildContent({
         dateStr,
         board,
-        getBotUsername: services.botUsername !== undefined ? async () => services.botUsername : resolveBotUsername,
-        render: services.renderChart || generateLonghuChart,
+        getBotUsername,
+        render,
         sendMessage: notify,
         sendPhoto: services.sendPhoto || telegram.sendPhoto
     });
+    // 每日总结网页：榜单写入网页（所有用户共用），这里只把龙虎榜加进各用户的入口页，不单独推送；
+    // 随后的游资动向推送会带上网页按钮。网页写入失败时按原方式推送图片
+    const page = resolveDailyPage(services);
+    if (page) {
+        try {
+            await page.publishLonghu({ date: dateStr, board, botUsername: await getBotUsername(), render });
+            content.kind = "page";
+            content.send = async chatId => { await page.publishIndex(await store.getSubscriber(chatId), dateStr); };
+        } catch (error) {
+            console.error(`⚠️ 龙虎榜网页写入失败，改为推送图片：${formatError(error)}`);
+        }
+    }
     const totals = await deliverToSubscribers(store, subscribers, { dateStr, send: content.send, final });
     if (final && totals.failed) {
         await alertAdmin(alertContext, { key: `${dateStr}:longhu-send`, text: `⚠️ 今日龙虎榜有${totals.failed}位用户推送失败，已无重试机会。` });

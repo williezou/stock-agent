@@ -160,3 +160,35 @@ test("生成内容：高胜率游资不受净买入排名限制（排在第11名
     assert.equal(content.seats.length, 10);
     assert.deepEqual(content.highWinSeats.map(seat => seat.code), ["12", "2"]);
 });
+
+test("每日总结网页：游资写入网页（只写一次），每人推一条“龙虎榜与游资动向已更新”加网页按钮；没有游资净买入也推；写入失败时照常推图", async () => {
+    const { calls, services, store } = setup();
+    const page = { hotMoney: 0, indexes: [] };
+    const messages = [];
+    store.getSubscriber = async chatId => ({ chat_id: chatId, longhu_enabled: true });
+    services.sendMessage = async (chatId, text, options) => { messages.push({ chatId, text, options }); };
+    services.dailyPage = {
+        async publishHotMoney({ date, content }) { page.hotMoney++; assert.equal(date, "2026-10-28"); assert.equal(content.seats.length, 3); },
+        async publishIndex(subscriber, date) { page.indexes.push(subscriber.chat_id); return `https://pages.test/p/${subscriber.chat_id}/${date}`; }
+    };
+    const result = await runHotMoneyTick(store, at("18:01"), services);
+    assert.equal(result.delivered, 2);
+    assert.equal(page.hotMoney, 1);
+    assert.deepEqual(page.indexes, ["100", "200"]);
+    assert.deepEqual(calls.photos, [], "不再单独推图");
+    assert.match(messages[0].text, /🐉 龙虎榜与游资动向已更新｜2026-10-28[^]*净买入第一：🏆国泰君安证券上海江苏路 \+1\.23亿/);
+    assert.equal(messages[1].options.replyMarkup.inline_keyboard[0][0].url, "https://pages.test/p/200/2026-10-28");
+
+    const empty = setup({ seats: [] });
+    const emptyMessages = [];
+    empty.store.getSubscriber = async chatId => ({ chat_id: chatId });
+    empty.services.sendMessage = async (chatId, text) => { emptyMessages.push(text); };
+    empty.services.dailyPage = { async publishHotMoney() {}, async publishIndex() { return "https://pages.test/p"; } };
+    assert.equal((await runHotMoneyTick(empty.store, at("18:01"), empty.services)).delivered, 2);
+    assert.doesNotMatch(emptyMessages[0], /净买入第一/);
+
+    const broken = setup();
+    broken.services.dailyPage = { async publishHotMoney() { throw new Error("storage down"); } };
+    assert.equal((await runHotMoneyTick(broken.store, at("18:01"), broken.services)).delivered, 2);
+    assert.deepEqual(broken.calls.photos.map(p => p.chatId), ["100", "200"]);
+});

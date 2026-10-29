@@ -28,6 +28,15 @@ function createHistoryRepository(pool) {
         );
     }
 
+    // 当天的盘中异动推送记录（资金异动与量价异动），按推送时间排序
+    async function listFundFlowAlerts(alertDate) {
+        const result = await pool.query(
+            "SELECT window_label, content FROM fund_flow_alerts WHERE alert_date = $1 ORDER BY created_at, id",
+            [alertDate]
+        );
+        return result.rows.map(row => ({ label: row.window_label, content: row.content }));
+    }
+
     async function getFundFlowState(stateDate, windowLabel) {
         const result = await pool.query(
             "SELECT state FROM fund_flow_state WHERE state_date = $1 AND window_label = $2",
@@ -67,6 +76,7 @@ function createHistoryRepository(pool) {
         adminAlerts,
         getCachedReports,
         getFundFlowState,
+        listFundFlowAlerts,
         pruneHistory,
         saveCachedReport,
         saveFundFlowAlert,

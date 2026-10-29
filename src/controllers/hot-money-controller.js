@@ -5,12 +5,15 @@ const { aggregateSeats, createHotMoneyService } = require("../models/market/hot-
 const { createLonghuService } = require("../models/market/longhu");
 const { getChinaClock, isWeekdayWindow, minutesOfDay } = require("../models/market/trading-calendar");
 const { alertAdmin } = require("../services/admin-alert");
+const { resolveDailyPage } = require("../services/daily-page");
 const { sendAndRecord } = require("../services/tracked-delivery");
 const { generateHotMoneyChart } = require("../views/charts/hot-money-chart");
+const { dailyPageButton, longhuUpdatedMessage } = require("../views/daily-page-view");
 const { formatHotMoneyCaption, formatHotMoneyText, isHighWinRate } = require("../views/hot-money-view");
 
 // 游资动向推送控制器：当天龙虎榜推送成功（榜单已发布完成）后，汇总游资席位推送给开启龙虎榜推送的用户；
-// 投递状态记在 daily_delivery_runs（失败10分钟后重试，重启不重复发送）
+// 投递状态记在 daily_delivery_runs（失败10分钟后重试，重启不重复发送）。
+// 开启每日总结网页时，游资动向写入网页，推送改为“龙虎榜与游资动向已更新”一条消息加网页按钮（当天第二条，没有游资净买入也推）
 const JOB_NAME = "hot-money";
 const LONGHU_JOB = "longhu";
 const WINDOW_START = 17 * 60 + 30;
@@ -23,8 +26,8 @@ function isHotMoneyWindow(now = new Date()) {
     return isWeekdayWindow(now, WINDOW_START, WINDOW_END);
 }
 
-// 当天的推送内容只生成一次，所有用户共用（进程内缓存；重启后重新生成，数据不变）
-const contentCache = { date: "", content: null };
+// 当天的推送内容只生成一次，所有用户共用（进程内缓存；重启后重新生成，数据不变）；published：已写入每日总结网页
+const contentCache = { date: "", content: null, published: false };
 
 let defaultServices;
 function getDefaultServices() {
@@ -97,6 +100,7 @@ async function runHotMoneyTick(store, now = new Date(), services = {}) {
         try {
             cache.content = await buildContent(dateStr, { ...getDefaultServices(), ...services });
             cache.date = dateStr;
+            cache.published = false;
         } catch (error) {
             console.error(`⚠️ 游资动向生成失败：${formatError(error)}`);
             if (final) {
@@ -112,7 +116,20 @@ async function runHotMoneyTick(store, now = new Date(), services = {}) {
     }
     const content = cache.content;
 
-    const send = content.seats.length || content.highWinSeats.length
+    const page = resolveDailyPage(services);
+    if (page && !cache.published) {
+        try {
+            await page.publishHotMoney({ date: dateStr, content, render: services.renderChart || generateHotMoneyChart });
+            cache.published = true;
+        } catch (error) {
+            console.error(`⚠️ 游资动向网页写入失败，改为推送图片：${formatError(error)}`);
+        }
+    }
+    const send = page && cache.published
+        ? async chatId => notify(chatId, longhuUpdatedMessage({ date: dateStr, hotMoney: content }), {
+            replyMarkup: dailyPageButton(await page.publishIndex(await store.getSubscriber(chatId), dateStr))
+        })
+        : content.seats.length || content.highWinSeats.length
         ? prepareSend(content, {
             render: services.renderChart || generateHotMoneyChart,
             sendPhoto: services.sendPhoto || telegram.sendPhoto,
