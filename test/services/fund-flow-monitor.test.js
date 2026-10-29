@@ -254,12 +254,15 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
         async sendMessage() { throw new Error("不应发文字"); }
     });
     await send("100", new Set());
-    await send("200", new Set(["300308"]));
+    await send("200", new Set(["300308"]), "xueqiu");
     assert.ok(Buffer.isBuffer(photos[0].photo));
     assert.equal(photos[0].filename, "fund-flow-1445.png");
     assert.equal(photos[1].photo, "large");
     assert.deepEqual(photos[0].options.replyMarkup.inline_keyboard.flat().map(button => button.text), ["📈中际旭创", "📉五粮液"]);
     assert.deepEqual(photos[1].options.replyMarkup.inline_keyboard.flat().map(button => button.text), ["📈中际旭创⭐", "📉五粮液"], "按钮按各自自选股标⭐");
+    assert.match(photos[0].options.replyMarkup.inline_keyboard[0][0].url, /mlink\.eastmoney\.com/, "没选过App时打开东方财富");
+    assert.equal(photos[1].options.replyMarkup.inline_keyboard[0][0].url, "https://xueqiu.com/S/SZ300308", "按钮打开各自选择的App");
+    assert.match(photos[1].caption, /点下方按钮打开雪球/);
 
     const texts = [];
     const fallback = prepareDelivery(CONTENT, {
@@ -267,6 +270,8 @@ test("推送发送：图片只上传一次，后续引用file_id；图表失败�
         async sendPhoto() { throw new Error("不应发图"); },
         async sendMessage(chatId, text) { texts.push(text); }
     });
-    await fallback("100", new Set());
+    await fallback("100", new Set(), "tonghuashun");
     assert.match(texts[0], /主力加速流入/);
+    assert.match(texts[0], /m\.10jqka\.com\.cn\/stockpage\/hs_300308/);
+    assert.match(texts[0], /点股票名称打开同花顺/);
 });

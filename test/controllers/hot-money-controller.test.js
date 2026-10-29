@@ -93,7 +93,7 @@ function setup({ longhuDone = true, seats = CONTENT.seats } = {}) {
         async listDueSubscribers(job, date, max, options) {
             assert.equal(job, "hot-money");
             assert.deepEqual(options, { audience: "longhu" });
-            return [{ chat_id: "100" }, { chat_id: "200" }].filter(s => !calls.completed.some(c => c.chatId === s.chat_id));
+            return [{ chat_id: "100" }, { chat_id: "200", quote_app: "tonghuashun" }].filter(s => !calls.completed.some(c => c.chatId === s.chat_id));
         },
         async hasCompletedRun(job) { assert.equal(job, "longhu"); return longhuDone; },
         async claimDeliveryRun() { return 1; },
@@ -129,6 +129,9 @@ test("游资动向调度：等龙虎榜推送成功后再推；图片只上传�
     assert.equal(result.delivered, 2);
     assert.deepEqual(calls.photos.map(p => [p.chatId, p.uploaded]), [["100", true], ["200", false]]);
     assert.match(calls.photos[0].caption, /今日游资动向/);
+    assert.match(calls.photos[0].caption, /mlink\.eastmoney\.com/);
+    assert.match(calls.photos[1].caption, /m\.10jqka\.com\.cn/, "图片说明里的股票链接按各自选择的App");
+    assert.doesNotMatch(calls.photos[1].caption, /mlink\.eastmoney\.com/);
     assert.deepEqual(calls.completed.map(c => c.status), ["done", "done"]);
 
     const empty = setup({ seats: [] });

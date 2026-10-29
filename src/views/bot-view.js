@@ -1,7 +1,8 @@
 const { TELEGRAM_TEXT_LIMIT } = require("../constants");
 const { MAX_ENTITIES, entityCount, visibleLength } = require("../lib/telegram-text");
 const { escapeHtml } = require("./format");
-const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
+const { QuoteApp } = require("./quote-app");
+const { StockLink, stockLinkLegend } = require("./stock-link");
 
 // 机器人的全部回复文案、Menu命令与键盘布局
 
@@ -13,6 +14,7 @@ const BOT_COMMANDS = [
     { command: "longhu", description: "开启/关闭龙虎榜与游资动向推送" },
     { command: "flow", description: "开启/关闭尾盘资金异动提醒" },
     { command: "spike", description: "开启/关闭盘中量价异动提醒" },
+    { command: "app", description: "选择股票链接打开的行情App" },
     { command: "stop", description: "暂停每日推送" },
     { command: "cancel", description: "取消当前操作" }
 ];
@@ -31,7 +33,7 @@ const LEGACY_BUTTONS = {
     LIST: "📋 追踪列表"
 };
 
-const HELP_TEXT = "点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒";
+const HELP_TEXT = `点击左下角 Menu 选择操作，或直接输入：\n/add 600519 添加股票\n/remove 600519 删除股票\n/list 查看追踪列表\n/longhu 开启/关闭每日龙虎榜与游资动向推送\n/flow 开启/关闭尾盘资金异动提醒\n/spike 开启/关闭盘中量价异动提醒\n/app 选择点股票名称打开的App（${QuoteApp.all.map(app => app.label).join("/")}）`;
 
 const MESSAGES = {
     help: HELP_TEXT,
@@ -62,6 +64,7 @@ const MESSAGES = {
     cannotBanAdmin: "不能拉黑管理员本人。",
     invalidFlowArgument: "用法：<code>/flow</code> 切换，<code>/flow on</code> 开启，<code>/flow off</code> 关闭。",
     invalidSpikeArgument: "用法：<code>/spike</code> 切换，<code>/spike on</code> 开启，<code>/spike off</code> 关闭。",
+    invalidAppArgument: `可选：${QuoteApp.all.map(app => app.label).join("、")}。发送 <code>/app</code> 点按钮选择，或直接输入如 <code>/app 同花顺</code>。`,
     invalidLonghuArgument: "用法：<code>/longhu</code> 切换，<code>/longhu on</code> 开启，<code>/longhu off</code> 关闭。",
     webhookReady: "✅ 股票追踪菜单已启用，点击左下角 Menu 选择操作。",
     serviceStarted: "✅ 本机股票追踪服务已启动，点击左下角 Menu 选择操作。"
@@ -76,11 +79,11 @@ function addPromptMarkup() {
     return { force_reply: true, input_field_placeholder: "输入股票代码" };
 }
 
-function watchlistText(targets, maxStocks) {
+function watchlistText(targets, maxStocks, app) {
     const lines = targets.map((target, index) =>
-        `${index + 1}. ${StockLink.of(target).html()}`
+        `${index + 1}. ${StockLink.of(target, app).html()}`
     );
-    return `<b>每日追踪列表（${targets.length}/${maxStocks}）</b>\n${lines.join("\n")}\n<i>${STOCK_LINK_LEGEND}</i>`;
+    return `<b>每日追踪列表（${targets.length}/${maxStocks}）</b>\n${lines.join("\n")}\n<i>${stockLinkLegend(app)}</i>`;
 }
 
 // /users 每条消息的长度上限：留出余量，低于Telegram单条消息4096字
@@ -91,6 +94,8 @@ function userBlock(user, index) {
     const handle = user.username ? `（@${user.username}）` : "";
     const watchlist = user.watchlist || [];
     const off = [user.longhu_enabled === false && "龙虎榜关", user.fund_flow_enabled === false && "资金异动关", user.volume_spike_enabled === false && "量价异动关"].filter(Boolean);
+    const app = QuoteApp.forSubscriber(user);
+    if (app !== QuoteApp.DEFAULT) off.push(app.label);
     const lines = [
         `${index + 1}. ${escapeHtml(name)}${escapeHtml(handle)} <code>${escapeHtml(user.chat_id)}</code>`,
         `　${[`自选${watchlist.length}只`, ...off, user.created_date].join(" · ")}`
@@ -155,16 +160,16 @@ function usersMessages(users, maxSubscribers) {
     return packMessages(blocks);
 }
 
-function alreadyTrackedText(symbol, name) {
-    return `${new StockLink(symbol, name).html()} 已在追踪列表中。`;
+function alreadyTrackedText(symbol, name, app) {
+    return `${new StockLink(symbol, name, app).html()} 已在追踪列表中。`;
 }
 
 function watchlistFullText(maxStocks) {
     return `最多追踪${maxStocks}只股票，请先删除不需要的代码。`;
 }
 
-function addedText(symbol, name) {
-    return `✅ 已添加 ${new StockLink(symbol, name).html()}，下个交易日将纳入收盘分析。`;
+function addedText(symbol, name, app) {
+    return `✅ 已添加 ${new StockLink(symbol, name, app).html()}，下个交易日将纳入收盘分析。`;
 }
 
 function removedText(symbol, removed) {
@@ -188,6 +193,33 @@ function volumeSpikeToggledText(enabled) {
     return enabled
         ? "✅ 已开启量价异动提醒：交易日盘中（默认9:30-11:30、13:00-14:57）几分钟内放量急涨急跌的股票每10分钟汇总推送一次。发送 /spike off 可关闭。"
         : "已关闭量价异动提醒，其他推送不受影响。发送 /spike on 可重新开启。";
+}
+
+// /app：列出可选的行情App，当前选择打 ✅
+const APP_CALLBACK_PREFIX = "app:";
+
+function appChoiceText(current) {
+    return `点股票名称时打开哪个App？当前：<b>${escapeHtml(current.label)}</b>\n推送、自选股列表与每日总结网页里的股票链接都会改为所选App。`;
+}
+
+function appChoiceMarkup(current) {
+    return {
+        inline_keyboard: [QuoteApp.all.map(app => ({
+            text: `${app === current ? "✅ " : ""}${app.label}`,
+            callback_data: `${APP_CALLBACK_PREFIX}${app.key}`
+        }))]
+    };
+}
+
+// 回调数据 app:<key> → QuoteApp；不是该回调或平台已下线时返回null
+function parseAppCallbackData(data) {
+    const text = String(data || "");
+    if (!text.startsWith(APP_CALLBACK_PREFIX)) return null;
+    return QuoteApp.all.find(app => app.key === text.slice(APP_CALLBACK_PREFIX.length)) || null;
+}
+
+function appChangedText(app) {
+    return `✅ 已改为点股票名称打开<b>${escapeHtml(app.label)}</b>，之后的推送与回复都按此生成链接。发送 /app 可再次更改。`;
 }
 
 function subscriberLabel(subscriber) {
@@ -225,8 +257,8 @@ function removeChoicesMarkup(targets) {
     return { inline_keyboard: inlineKeyboard };
 }
 
-function confirmRemoveText(symbol, name) {
-    return `确认删除 ${new StockLink(symbol, name).html()}？`;
+function confirmRemoveText(symbol, name, app) {
+    return `确认删除 ${new StockLink(symbol, name, app).html()}？`;
 }
 
 function confirmRemoveMarkup(symbol) {
@@ -246,6 +278,9 @@ module.exports = {
     addPromptMarkup,
     addedText,
     alreadyTrackedText,
+    appChangedText,
+    appChoiceMarkup,
+    appChoiceText,
     ambiguousSubscriberText,
     bannedText,
     confirmRemoveMarkup,
@@ -256,6 +291,7 @@ module.exports = {
     removeChoicesMarkup,
     removeKeyboardMarkup,
     notBannedText,
+    parseAppCallbackData,
     removedText,
     subscriberNotFoundText,
     unbannedText,

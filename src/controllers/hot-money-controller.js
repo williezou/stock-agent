@@ -8,6 +8,7 @@ const { alertAdmin } = require("../services/admin-alert");
 const { resolveDailyPage } = require("../services/daily-page");
 const { sendAndRecord } = require("../services/tracked-delivery");
 const { generateHotMoneyChart } = require("../views/charts/hot-money-chart");
+const { QuoteApp } = require("../views/quote-app");
 const { dailyPageButton, longhuUpdatedMessage } = require("../views/daily-page-view");
 const { formatHotMoneyCaption, formatHotMoneyText, isHighWinRate } = require("../views/hot-money-view");
 
@@ -61,7 +62,7 @@ async function buildContent(dateStr, { hotMoney, longhu }) {
     };
 }
 
-// 优先发图表（图片只上传一次，之后引用 file_id），图表生成失败时退回文字版
+// 优先发图表（图片只上传一次，之后引用 file_id），图表生成失败时退回文字版；股票名称链接按各自选择的App
 function prepareSend(content, { render, sendPhoto, sendMessage }) {
     let png = null;
     try {
@@ -70,11 +71,13 @@ function prepareSend(content, { render, sendPhoto, sendMessage }) {
         console.error(`⚠️ 游资动向图表生成失败，改发文字：${formatError(error)}`);
     }
     let fileId = null;
-    const caption = formatHotMoneyCaption(content);
-    const text = formatHotMoneyText(content);
-    return async chatId => {
-        if (!png) return sendMessage(chatId, text);
-        const message = await sendPhoto(chatId, fileId || png, caption, `hot-money-${content.date}.png`);
+    const caption = QuoteApp.memo(app => formatHotMoneyCaption(content, { app }));
+    const text = QuoteApp.memo(app => formatHotMoneyText(content, { app }));
+    return async subscriber => {
+        const chatId = subscriber.chat_id;
+        const app = QuoteApp.forSubscriber(subscriber);
+        if (!png) return sendMessage(chatId, text(app));
+        const message = await sendPhoto(chatId, fileId || png, caption(app), `hot-money-${content.date}.png`);
         fileId = fileId || telegram.largestPhotoFileId(message);
     };
 }
@@ -126,8 +129,8 @@ async function runHotMoneyTick(store, now = new Date(), services = {}) {
         }
     }
     const send = page && cache.published
-        ? async chatId => notify(chatId, longhuUpdatedMessage({ date: dateStr, hotMoney: content }), {
-            replyMarkup: dailyPageButton(await page.publishIndex(await store.getSubscriber(chatId), dateStr))
+        ? async subscriber => notify(subscriber.chat_id, longhuUpdatedMessage({ date: dateStr, hotMoney: content }), {
+            replyMarkup: dailyPageButton(await page.publishIndex(await store.getSubscriber(subscriber.chat_id), dateStr))
         })
         : content.seats.length || content.highWinSeats.length
         ? prepareSend(content, {
@@ -146,7 +149,7 @@ async function runHotMoneyTick(store, now = new Date(), services = {}) {
                 totals.skipped++;
                 continue;
             }
-            totals[await sendAndRecord(store, { jobName: JOB_NAME, chatId, runDate: dateStr, send: () => send(chatId), finalAttempt: final })]++;
+            totals[await sendAndRecord(store, { jobName: JOB_NAME, chatId, runDate: dateStr, send: () => send(subscriber), finalAttempt: final })]++;
         } catch (error) {
             console.error(`❌ 处理${chatId}的游资动向投递失败：${formatError(error)}`);
             totals.failed++;

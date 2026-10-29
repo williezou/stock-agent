@@ -2,7 +2,7 @@ const { STYLE_LABELS, STYLE_ORDER, TELEGRAM_TEXT_LIMIT } = require("../constants
 const { MAX_ENTITIES, entityCount, visibleLength } = require("../lib/telegram-text");
 const { formatOverviewRow, formatStockCaption } = require("./daily-report-view");
 const { escapeHtml, number, signed } = require("./format");
-const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
+const { StockLink, stockLinkLegend } = require("./stock-link");
 
 // A股扫描的展示：结论文字、分类总览图说明、可操作标的个股图
 // 图表字体仅含部分ASCII字母（无J/Q），标题需避开这些字符
@@ -106,7 +106,7 @@ function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
         adviceLines(picksByStyle, longhiData, withReasons).join("\n"),
         styleLines.join("\n"),
         ...(withMarket && marketLines.length ? [["<b>🔥 市场热点（不含已入选）</b>", ...marketLines].join("\n")] : []),
-        `<i>${STOCK_LINK_LEGEND}。以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</i>`
+        `<i>${stockLinkLegend()}。以上由程序按公开行情规则生成，仅供参考，不构成投资建议；请结合自身风险承受能力决策。</i>`
     ].join("\n\n");
 
     // 超长或格式实体过多时按整段舍弃次要内容，避免截断HTML标签导致Telegram解析失败
@@ -122,7 +122,7 @@ function formatScanSummary({ now, picksByStyle, longhiData = {} }) {
 }
 
 function formatScanOverviewCaption(style, reports, date) {
-    return [`<b>${STYLE_LABELS[style]}入选｜${escapeHtml(date)}</b>`, ...reports.map(formatOverviewRow)].join("\n");
+    return [`<b>${STYLE_LABELS[style]}入选｜${escapeHtml(date)}</b>`, ...reports.map(report => formatOverviewRow(report))].join("\n");
 }
 
 function formatScanDelivery({ picksByStyle, date }) {

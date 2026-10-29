@@ -5,7 +5,7 @@ const { formatLonghuMessage } = require("./longhu-view");
 const { StockLink } = require("./stock-link");
 
 // 每日总结网页：一个入口页（按用户的推送开关列出各段）+ 各段的HTML片段（各任务完成时分别写入，入口页打开时加载）。
-// 片段内容复用Telegram推送的文字格式（<b>/<i>/<a>/<code> 本身就是合法HTML），按原换行显示
+// 片段内容复用Telegram推送的文字格式（<b>/<i>/<a>/<code> 本身就是合法HTML），按原换行显示；股票名称链接打开 app（用户选择的行情App）
 
 const STYLE = `
 :root { --bg: #f5f7fa; --card: #ffffff; --text: #1e293b; --muted: #64748b; --line: #e2e8f0; --up: #e03131; --down: #16a34a; --accent: #2563eb; }
@@ -106,7 +106,7 @@ function withoutNotes(text) {
 }
 
 // 个股卡片：名称与涨跌、交易计划、K线图、支撑压力与量能、最新催化；技术指标收在“详情”里
-function stockCard({ meta, analysis, plan, news = [], announcements = [] }, chartUrl) {
+function stockCard({ meta, analysis, plan, news = [], announcements = [] }, chartUrl, app) {
     const { latest, ma, macd, rsi, kdj, bollinger } = analysis;
     const catalyst = [...announcements, ...news].find(item => item && item.title);
     const indicators = [
@@ -118,7 +118,7 @@ function stockCard({ meta, analysis, plan, news = [], announcements = [] }, char
         `盈亏比 ${number(plan.rewardRisk)}:1；跳空可能令实际亏损超过止损幅度`
     ];
     return `<div class="card" id="s-${meta.symbol}">`
-        + `<div class="stock-head">${StockLink.of(meta).html({ code: false })}`
+        + `<div class="stock-head">${StockLink.of(meta, app).html({ code: false })}`
         + `<span class="price">${number(latest.close)} <span class="${changeClass(latest.changePct)}">${signed(latest.changePct)}</span></span></div>`
         + `<div class="plan"><b>${escapeHtml(plan.recommendation)}</b>｜回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}｜止损 ${number(plan.stop)}｜目标 ${number(plan.target)}</div>`
         + chartImage(chartUrl, `${meta.name} K线`)
@@ -129,7 +129,7 @@ function stockCard({ meta, analysis, plan, news = [], announcements = [] }, char
 }
 
 // 自选股收盘：总览表（点名称跳到下方个股）+ 每只一张卡片
-function closeFragment({ reports, chartUrls }) {
+function closeFragment({ reports, chartUrls, app }) {
     const rows = reports.map(({ meta, analysis, plan }) => {
         const latest = analysis.latest;
         return `<tr><td><a href="#s-${meta.symbol}">${escapeHtml(meta.name || meta.symbol)}</a></td>`
@@ -138,12 +138,12 @@ function closeFragment({ reports, chartUrls }) {
             + `<td><b>${escapeHtml(plan.recommendation)}</b></td></tr>`;
     });
     const table = card(`<table><thead><tr><th>名称</th><th>收盘</th><th>涨跌</th><th>建议</th></tr></thead><tbody>${rows.join("")}</tbody></table>`);
-    return [table, ...reports.map(report => stockCard(report, chartUrls.get(report.meta.symbol)))].join("\n");
+    return [table, ...reports.map(report => stockCard(report, chartUrls.get(report.meta.symbol), app))].join("\n");
 }
 
 // 盘中异动回顾：当天所有推送合并成两张清单（量价异动、资金异动），按时间排序，不标自选股
-function stockCell(row) {
-    return new StockLink(row.symbol, String(row.name || "").replace(/\s+/g, "")).html({ code: false });
+function stockCell(row, app) {
+    return new StockLink(row.symbol, String(row.name || "").replace(/\s+/g, ""), app).html({ code: false });
 }
 
 function pctCell(value) {
@@ -154,7 +154,7 @@ function listCard(title, head, rows) {
     return card(`<b>${title}</b><table><thead><tr>${head.map(text => `<th>${text}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`);
 }
 
-function intradayFragment({ alerts }) {
+function intradayFragment({ alerts, app }) {
     const spikes = [];
     const flows = [];
     let lookback = 5;
@@ -172,14 +172,14 @@ function intradayFragment({ alerts }) {
         parts.push(listCard(
             `量价异动 ${spikes.length}只（急涨${upCount}、急跌${spikes.length - upCount}）`,
             ["时间", "名称", `${lookback}分钟`, "成交", "今日"],
-            spikes.sort(byTime).map(row => `<tr><td>${row.time}</td><td>${stockCell(row)}</td>${pctCell(row.windowChange)}<td>${signedAmount(row.windowAmount).replace(/^\+/, "")}</td>${pctCell(row.changePct)}</tr>`)
+            spikes.sort(byTime).map(row => `<tr><td>${row.time}</td><td>${stockCell(row, app)}</td>${pctCell(row.windowChange)}<td>${signedAmount(row.windowAmount).replace(/^\+/, "")}</td>${pctCell(row.changePct)}</tr>`)
         ));
     }
     if (flows.length) {
         parts.push(listCard(
             `尾盘资金异动 ${flows.length}只`,
             ["时间", "名称", "主力净额变化", "今日"],
-            flows.sort(byTime).map(row => `<tr><td>${row.time}</td><td>${stockCell(row)}</td><td class="${changeClass(row.delta)}"><b>${deltaText(row)}</b></td>${pctCell(row.changePct)}</tr>`)
+            flows.sort(byTime).map(row => `<tr><td>${row.time}</td><td>${stockCell(row, app)}</td><td class="${changeClass(row.delta)}"><b>${deltaText(row)}</b></td>${pctCell(row.changePct)}</tr>`)
         ));
     }
     parts.push(`<p class="note">量价异动：${lookback}分钟内涨跌幅变化与成交额（沪市上交所、深市新浪财经行情）；资金异动：主力净额为数据商按大单估算，非交易所官方口径。</p>`);
@@ -192,12 +192,12 @@ function chartWithDetails(chartUrl, alt, summary, text) {
     return card(`${chartImage(chartUrl, alt)}<details><summary>${summary}</summary><div class="tg">${text}</div></details>`);
 }
 
-function longhuFragment({ date, board, botUsername, chartUrl }) {
-    return chartWithDetails(chartUrl, "龙虎榜", "榜单明细（点📋查看买卖席位）", withoutNotes(formatLonghuMessage({ date, board, botUsername })));
+function longhuFragment({ date, board, botUsername, chartUrl, app }) {
+    return chartWithDetails(chartUrl, "龙虎榜", "榜单明细（点📋查看买卖席位）", withoutNotes(formatLonghuMessage({ date, board, botUsername, app })));
 }
 
-function hotMoneyFragment({ content, chartUrl }) {
-    return chartWithDetails(chartUrl, "游资动向", "游资明细", withoutNotes(formatHotMoneyText(content)));
+function hotMoneyFragment({ content, chartUrl, app }) {
+    return chartWithDetails(chartUrl, "游资动向", "游资明细", withoutNotes(formatHotMoneyText(content, { app })));
 }
 
 // 推送消息下方打开网页的按钮
@@ -206,9 +206,9 @@ function dailyPageButton(url) {
 }
 
 // 收盘推送：概况（每只一行）+ 按钮，明细在网页里
-function closeMessage({ reports, date }) {
+function closeMessage({ reports, date, app }) {
     const rows = reports.map(({ meta, analysis, plan }) =>
-        `${StockLink.of(meta).html({ bold: true, code: false })} ${number(analysis.latest.close)} ${signed(analysis.latest.changePct)}　<b>${escapeHtml(plan.recommendation)}</b>`);
+        `${StockLink.of(meta, app).html({ bold: true, code: false })} ${number(analysis.latest.close)} ${signed(analysis.latest.changePct)}　<b>${escapeHtml(plan.recommendation)}</b>`);
     return [`<b>📊 每日收盘总结｜${escapeHtml(date)}</b>`, ...rows, "<i>K线、技术指标、交易计划与盘中异动回顾见网页。</i>"].join("\n");
 }
 

@@ -1,5 +1,5 @@
 const { escapeHtml, signed } = require("./format");
-const { DOWN_MARK, STOCK_BUTTON_LEGEND, STOCK_LINK_LEGEND, StockLink, UP_MARK, stockButtonMarkup } = require("./stock-link");
+const { DOWN_MARK, StockLink, UP_MARK, stockButtonLegend, stockButtonMarkup, stockLinkLegend } = require("./stock-link");
 
 // 资金异动推送：图表（区间主力净额变化条形图）+ 图片说明（标题与概况）+ 图片下方的股票按钮（可跳转App）；
 // 图表生成失败时退回文字版（股票名称可跳转App）
@@ -31,21 +31,21 @@ function summaryText({ since, inflow, outflow }) {
     return `较${since}：主力加速流入${inflow.length}只、加速流出${outflow.length}只`;
 }
 
-// 每只股票一行：自选股加 ⭐，名称可跳转东方财富，区间变化加粗，附当日涨跌幅。
+// 每只股票一行：自选股加 ⭐，名称可跳转所选App，区间变化加粗，附当日涨跌幅。
 // 东方财富的名称里有补齐用的空格（如“五 粮 液”），去掉以免占宽
-function stockLine(row, watchSymbols) {
+function stockLine(row, watchSymbols, app) {
     const star = watchSymbols.has(row.symbol) ? "⭐" : "";
-    const stock = new StockLink(row.symbol, row.name.replace(/\s+/g, "")).html({ code: false });
+    const stock = new StockLink(row.symbol, row.name.replace(/\s+/g, ""), app).html({ code: false });
     return `${star}${stock} <b>${deltaText(row)}</b> ${signed(row.changePct)}`;
 }
 
 // 文字版（图表生成失败时的后备）：每只股票一行，附当日涨跌幅
 function formatFundFlowAlert(content) {
-    const { inflow, outflow, watchSymbols = new Set() } = content;
+    const { inflow, outflow, watchSymbols = new Set(), app } = content;
     const lines = [`<b>🚨 ${escapeHtml(titleText(content))}</b>`, summaryText(content)];
-    if (inflow.length) lines.push("", "<b>🔺 主力加速流入</b>", ...inflow.map(row => stockLine(row, watchSymbols)));
-    if (outflow.length) lines.push("", "<b>🔻 主力加速流出</b>", ...outflow.map(row => stockLine(row, watchSymbols)));
-    lines.push("", `<i>${STOCK_LINK_LEGEND}。${sourceNote(content.source)}${OPT_OUT_NOTE}</i>`);
+    if (inflow.length) lines.push("", "<b>🔺 主力加速流入</b>", ...inflow.map(row => stockLine(row, watchSymbols, app)));
+    if (outflow.length) lines.push("", "<b>🔻 主力加速流出</b>", ...outflow.map(row => stockLine(row, watchSymbols, app)));
+    lines.push("", `<i>${stockLinkLegend(app)}。${sourceNote(content.source)}${OPT_OUT_NOTE}</i>`);
     return lines.join("\n");
 }
 
@@ -54,13 +54,13 @@ function formatFundFlowCaption(content) {
     return [
         `<b>🚨 ${escapeHtml(titleText(content))}</b>`,
         summaryText(content),
-        `<i>${STOCK_BUTTON_LEGEND}。${sourceNote(content.source)}${OPT_OUT_NOTE}</i>`
+        `<i>${stockButtonLegend(content.app)}。${sourceNote(content.source)}${OPT_OUT_NOTE}</i>`
     ].join("\n");
 }
 
 // 图片下方的股票按钮，顺序与图中一致
-function fundFlowKeyboard({ inflow, outflow, watchSymbols }) {
-    return stockButtonMarkup([{ mark: UP_MARK, rows: inflow }, { mark: DOWN_MARK, rows: outflow }], watchSymbols);
+function fundFlowKeyboard({ inflow, outflow, watchSymbols, app }) {
+    return stockButtonMarkup([{ mark: UP_MARK, rows: inflow }, { mark: DOWN_MARK, rows: outflow }], { watchSymbols, app });
 }
 
 module.exports = {

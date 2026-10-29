@@ -1,5 +1,5 @@
 const { escapeHtml, money, shortText, signed } = require("./format");
-const { StockLink } = require("./stock-link");
+const { StockLink, stockLinkLegend } = require("./stock-link");
 
 // 每日龙虎榜推送：上榜概况 + 净买入/净卖出排行
 const TOP_BUY = 10;
@@ -79,14 +79,14 @@ function seatLinkUrl(symbol, date, botUsername) {
         : longhuDetailUrl(symbol, date);
 }
 
-// 股票名称经 StockLink 渲染（名称链接东方财富，可跳转App），龙虎榜额外附 📋（查看席位）
-function longhuStock(item, date, botUsername, options = {}) {
-    return StockLink.of(item).html({ ...options, extraLinks: [{ label: SEAT_ICON, url: seatLinkUrl(item.symbol, date, botUsername) }] });
+// 股票名称经 StockLink 渲染（名称链接所选App），龙虎榜额外附 📋（查看席位）
+function longhuStock(item, date, botUsername, app, options = {}) {
+    return StockLink.of(item, app).html({ ...options, extraLinks: [{ label: SEAT_ICON, url: seatLinkUrl(item.symbol, date, botUsername) }] });
 }
 
-function boardLine(item, index, date, botUsername) {
+function boardLine(item, index, date, botUsername, app) {
     const reason = escapeHtml(shortText(compactReason(item.reason), REASON_MAX_CHARS)) || "—";
-    return `${index + 1}. ${longhuStock(item, date, botUsername)} ${signed(item.changePct)}｜净额 ${signedMoney(item.netAmount)}\n　${reason}`;
+    return `${index + 1}. ${longhuStock(item, date, botUsername, app)} ${signed(item.changePct)}｜净额 ${signedMoney(item.netAmount)}\n　${reason}`;
 }
 
 // 文字消息与图表共用的榜单统计：分市场家数、上涨家数、合计净买入、净买入/净卖出排行
@@ -111,17 +111,19 @@ function overviewLine(summary) {
 const SOURCE_NOTE = "数据来源：沪深北交易所当日公开信息（同花顺/东方财富整理），仅供参考，不构成投资建议。";
 const OPT_OUT_NOTE = "发送 /longhu off 可关闭龙虎榜推送。";
 const SEAT_ICON = "📋";
-const LINK_NOTE = `点${SEAT_ICON}查看当日买卖席位；点股票名称打开东方财富行情（可跳转App）。`;
+function linkNote(app) {
+    return `点${SEAT_ICON}查看当日买卖席位；${stockLinkLegend(app)}。`;
+}
 const BUTTON_NOTE = "点下方股票名称查看当日买卖席位（前10只为净买入，其后为净卖出）。";
 
 // 文字版（图表生成失败时的后备）
-function formatLonghuMessage({ date, board, botUsername }) {
+function formatLonghuMessage({ date, board, botUsername, app }) {
     const summary = summarizeBoard(board);
     const sections = [`<b>🐉 龙虎榜｜${escapeHtml(date)}</b>\n${overviewLine(summary)}`];
-    const line = (item, index) => boardLine(item, index, date, botUsername);
+    const line = (item, index) => boardLine(item, index, date, botUsername, app);
     if (summary.buyers.length) sections.push([`<b>💰 净买入前${summary.buyers.length}</b>`, ...summary.buyers.map(line)].join("\n"));
     if (summary.sellers.length) sections.push([`<b>📉 净卖出前${summary.sellers.length}</b>`, ...summary.sellers.map(line)].join("\n"));
-    sections.push(`<i>${LINK_NOTE}</i>\n<i>${SOURCE_NOTE}</i>\n<i>${OPT_OUT_NOTE}</i>`);
+    sections.push(`<i>${linkNote(app)}</i>\n<i>${SOURCE_NOTE}</i>\n<i>${OPT_OUT_NOTE}</i>`);
     // 最多15行明细，长度远低于Telegram 4096字符上限
     return sections.join("\n\n");
 }
@@ -171,10 +173,10 @@ function formatLonghuKeyboard({ date, board }) {
     };
 }
 
-// 席位表格图片下方：[东方财富] [同花顺] [电脑版]
-function formatSeatKeyboard({ date, symbol }) {
+// 席位表格图片下方：[所选App] [其他App…] [电脑版]
+function formatSeatKeyboard({ date, symbol, app }) {
     return {
-        inline_keyboard: [new StockLink(symbol).appButtonRow([{ text: "电脑版", url: longhuDetailUrl(symbol, date) }])]
+        inline_keyboard: [new StockLink(symbol, "", app).appButtonRow([{ text: "电脑版", url: longhuDetailUrl(symbol, date) }])]
     };
 }
 
@@ -191,13 +193,13 @@ function seatLine(seat, index) {
     return `${index + 1}. ${escapeHtml(shortText(shortSeatName(seat.name), 18))}\n　买${compactAmount(seat.buy)} 卖${compactAmount(seat.sell)} 净${net}`;
 }
 
-function quoteLinksLine(symbol, date) {
-    return `📱 行情（可跳转App）：${new StockLink(symbol).appLinksLine()}\n💻 <a href="${escapeHtml(longhuDetailUrl(symbol, date))}">电脑版龙虎榜详情</a>`;
+function quoteLinksLine(symbol, date, app) {
+    return `📱 行情（可跳转App）：${new StockLink(symbol, "", app).appLinksLine()}\n💻 <a href="${escapeHtml(longhuDetailUrl(symbol, date))}">电脑版龙虎榜详情</a>`;
 }
 
 // 点击龙虎榜股票名称后，机器人回复的当日席位明细（每个上榜原因一组）
-function formatSeatDetail({ date, detail }) {
-    const sections = [`🐉 ${StockLink.of(detail).html({ bold: true })} ${signed(detail.changePct)}｜${escapeHtml(date)} 龙虎榜`];
+function formatSeatDetail({ date, detail, app }) {
+    const sections = [`🐉 ${StockLink.of(detail, app).html({ bold: true })} ${signed(detail.changePct)}｜${escapeHtml(date)} 龙虎榜`];
     for (const group of detail.groups) {
         const lines = [
             `📌 <b>${escapeHtml(compactReason(group.reason))}</b>`,
@@ -207,7 +209,7 @@ function formatSeatDetail({ date, detail }) {
         if (group.sellers.length) lines.push("🟢 卖出前5", ...group.sellers.map(seatLine));
         sections.push(lines.join("\n"));
     }
-    sections.push(quoteLinksLine(detail.symbol, date));
+    sections.push(quoteLinksLine(detail.symbol, date, app));
     return sections.join("\n\n");
 }
 
@@ -216,8 +218,8 @@ function formatSeatCaption({ date, detail }) {
     return `🐉 <b>${escapeHtml(detail.name)}</b> <code>${detail.symbol}</code> ${signed(detail.changePct)}｜${escapeHtml(date)} 龙虎榜席位`;
 }
 
-function formatSeatNotFound({ date, symbol }) {
-    return `${escapeHtml(date)} 未查询到 ${new StockLink(symbol).html()} 的龙虎榜席位（可能未上榜或数据暂不可用）。\n\n${quoteLinksLine(symbol, date)}`;
+function formatSeatNotFound({ date, symbol, app }) {
+    return `${escapeHtml(date)} 未查询到 ${new StockLink(symbol).html()} 的龙虎榜席位（可能未上榜或数据暂不可用）。\n\n${quoteLinksLine(symbol, date, app)}`;
 }
 
 module.exports = {

@@ -1,6 +1,7 @@
 const { escapeHtml, signed } = require("./format");
 const { signedAmount } = require("./fund-flow-view");
-const { DOWN_MARK, STOCK_BUTTON_LEGEND, StockLink, UP_MARK, stockButtonMarkup } = require("./stock-link");
+const { QuoteApp } = require("./quote-app");
+const { DOWN_MARK, StockLink, UP_MARK, stockButtonLegend, stockButtonMarkup } = require("./stock-link");
 
 // 量价异动推送：图表（每只股票的触发时间、回看时段内的涨跌幅变化与成交额、当日涨跌幅）+ 图片说明（只有标题）
 // + 图片下方的股票按钮（可跳转App）；图表生成失败时退回文字版（每只股票一行，名称可跳转App）
@@ -36,30 +37,30 @@ function sectionTitle(emoji, title, total, rows) {
 }
 
 // 每只股票一行：触发时间、名称（自选股加 ⭐）、回看时段内的涨跌幅变化（加粗）、这段时间的成交额、当日涨跌幅
-function stockLine(row, watchSymbols) {
+function stockLine(row, watchSymbols, app) {
     const star = watchSymbols.has(row.symbol) ? "⭐" : "";
-    const stock = new StockLink(row.symbol, row.name).html({ code: false });
+    const stock = new StockLink(row.symbol, row.name, app).html({ code: false });
     return `<code>${row.time}</code> ${star}${stock} <b>${signed(row.windowChange)}</b> 成交${amountText(row.windowAmount)} 今日${signed(row.changePct)}`;
 }
 
 // 文字版（图表生成失败时的后备）
 function formatVolumeSpikeAlert(content) {
-    const { up, down, upTotal = up.length, downTotal = down.length, watchSymbols = new Set() } = content;
+    const { up, down, upTotal = up.length, downTotal = down.length, watchSymbols = new Set(), app = QuoteApp.DEFAULT } = content;
     const lines = [`<b>⚡ ${escapeHtml(titleText(content))}</b>`];
-    if (up.length) lines.push("", sectionTitle("🔺", "急涨放量", upTotal, up), ...up.map(row => stockLine(row, watchSymbols)));
-    if (down.length) lines.push("", sectionTitle("🔻", "急跌放量", downTotal, down), ...down.map(row => stockLine(row, watchSymbols)));
-    lines.push("", `<i>加粗为${content.lookbackMinutes}分钟内涨跌幅变化，成交额为这段时间的成交，点名称打开东方财富。${sourceNote(content.sources)}。${OPT_OUT_NOTE}</i>`);
+    if (up.length) lines.push("", sectionTitle("🔺", "急涨放量", upTotal, up), ...up.map(row => stockLine(row, watchSymbols, app)));
+    if (down.length) lines.push("", sectionTitle("🔻", "急跌放量", downTotal, down), ...down.map(row => stockLine(row, watchSymbols, app)));
+    lines.push("", `<i>加粗为${content.lookbackMinutes}分钟内涨跌幅变化，成交额为这段时间的成交，点名称打开${app.label}。${sourceNote(content.sources)}。${OPT_OUT_NOTE}</i>`);
     return lines.join("\n");
 }
 
 // 图片说明：标题，明细看图，股票在图片下方的按钮里
 function formatVolumeSpikeCaption(content) {
-    return `<b>⚡ ${escapeHtml(titleText(content))}</b>\n<i>${STOCK_BUTTON_LEGEND}。${OPT_OUT_NOTE}</i>`;
+    return `<b>⚡ ${escapeHtml(titleText(content))}</b>\n<i>${stockButtonLegend(content.app)}。${OPT_OUT_NOTE}</i>`;
 }
 
 // 图片下方的股票按钮，顺序与图中一致
-function volumeSpikeKeyboard({ up, down, watchSymbols }) {
-    return stockButtonMarkup([{ mark: UP_MARK, rows: up }, { mark: DOWN_MARK, rows: down }], watchSymbols);
+function volumeSpikeKeyboard({ up, down, watchSymbols, app }) {
+    return stockButtonMarkup([{ mark: UP_MARK, rows: up }, { mark: DOWN_MARK, rows: down }], { watchSymbols, app });
 }
 
 module.exports = {

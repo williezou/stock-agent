@@ -108,7 +108,7 @@ class FundFlowMonitor {
     }
 
     // deps：fundFlow（getRanking）、isTradingDay、listSubscribers、listWatchSymbols、
-    // prepare（由推送内容生成 send(chatId, watchSymbols)，图片只生成一次供所有订阅者共用）、
+    // prepare（由推送内容生成 send(chatId, watchSymbols, appKey)，图片只生成一次供所有订阅者共用）、
     // isBotBlocked、deactivateSubscriber、alertContext（管理员告警）；
     // 可选的 loadState/saveState（监控状态存库）与 recordAlert（推送记录存库）
     async tick(now, deps) {
@@ -176,7 +176,7 @@ class FundFlowMonitor {
         for (const subscriber of subscribers) {
             const chatId = subscriber.chat_id;
             try {
-                await send(chatId, await deps.listWatchSymbols(chatId));
+                await send(chatId, await deps.listWatchSymbols(chatId), subscriber.quote_app);
                 totals.delivered++;
             } catch (error) {
                 if (deps.isBotBlocked(error)) {

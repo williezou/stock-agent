@@ -13,7 +13,7 @@ const FULL_BOARD = [
 ];
 
 function setup({ boards, subscribers = [{ chat_id: "100" }, { chat_id: "200" }], trading = { ok: true, verified: true }, sendError, fetchError, renderChart } = {}) {
-    const calls = { sent: [], photos: [], texts: [], completed: [], failed: [], deactivated: [], alerts: [], tradingChecks: 0, fetches: 0 };
+    const calls = { sent: [], photos: [], texts: [], messages: [], completed: [], failed: [], deactivated: [], alerts: [], tradingChecks: 0, fetches: 0 };
     const store = {
         async listDueSubscribers(job, date, max, options) {
             assert.equal(job, "longhu");
@@ -39,6 +39,7 @@ function setup({ boards, subscribers = [{ chat_id: "100" }, { chat_id: "200" }],
             if (error) throw error;
             calls.sent.push(chatId);
             calls.texts.push(chatId);
+            calls.messages.push(text);
         },
         async sendPhoto(chatId, photo, caption, filename, options = {}) {
             const error = sendError && sendError(chatId);
@@ -207,4 +208,16 @@ test("每日总结网页：榜单写入网页后只更新各用户的入口页�
     broken.services.dailyPage = { async publishLonghu() { throw new Error("storage down"); } };
     assert.equal((await runLonghuTick(broken.store, at("20:20"), broken.services)).format, "chart");
     assert.deepEqual(broken.calls.photos.map(p => p.chatId), ["100", "200"]);
+});
+
+test("文字版的股票名称链接按各自选择的App", async () => {
+    const { calls, services, store } = setup({
+        boards: [FULL_BOARD],
+        subscribers: [{ chat_id: "100" }, { chat_id: "200", quote_app: "xueqiu" }],
+        renderChart: () => { throw new Error("未找到可用的中文字体"); }
+    });
+    await runLonghuTick(store, at("20:20"), services);
+    assert.match(calls.messages[0], /mlink\.eastmoney\.com[^"]*600000/);
+    assert.match(calls.messages[1], /<a href="https:\/\/xueqiu.com\/S\/SH600000">沪股<\/a>/);
+    assert.match(calls.messages[1], /点股票名称打开雪球/);
 });

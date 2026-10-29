@@ -40,10 +40,10 @@ function summaryText({ seats, totalSeats }) {
 
 // 手机上每家固定两行：① 名次 营业部 净买入；② 胜率 · 买入的股票（名称可跳转App，金额看图）。
 // 高胜率一段本身都是🏆，名称前不再重复标注
-function seatLines(seat, index, { links, stockLimit, trophy = true }) {
+function seatLines(seat, index, { links, app, stockLimit, trophy = true }) {
     const mark = RANK_MARKS[index] || `${index + 1}.`;
     const stocks = boughtStocks(seat, stockLimit)
-        .map(stock => (links ? new StockLink(stock.symbol, stock.name).html({ code: false }) : escapeHtml(stock.name)))
+        .map(stock => (links ? new StockLink(stock.symbol, stock.name, app).html({ code: false }) : escapeHtml(stock.name)))
         .join("、");
     return [
         `${mark} <b>${escapeHtml(trophy ? seatLabel(seat) : shortSeatName(seat.name))}</b>  ${signedAmount(seat.net)}`,
@@ -52,34 +52,34 @@ function seatLines(seat, index, { links, stockLimit, trophy = true }) {
 }
 
 // 高胜率游资放在前面（参考价值更大）；当天没有时注明，避免以为漏推
-function formatHotMoneyText(content, { links = true, stockLimit = STOCKS_PER_SEAT, highWinStockLimit = STOCKS_PER_SEAT, highWinCount = Infinity } = {}) {
+function formatHotMoneyText(content, { links = true, app, stockLimit = STOCKS_PER_SEAT, highWinStockLimit = STOCKS_PER_SEAT, highWinCount = Infinity } = {}) {
     const highWin = (content.highWinSeats || []).slice(0, highWinCount);
     return [
         `<b>🐯 今日游资动向｜${escapeHtml(String(content.date).slice(5))}</b>`,
         "",
         "<b>🏆 高胜率游资出手</b>",
         ...(highWin.length
-            ? highWin.map((seat, index) => seatLines(seat, index, { links, stockLimit: highWinStockLimit, trophy: false }))
+            ? highWin.map((seat, index) => seatLines(seat, index, { links, app, stockLimit: highWinStockLimit, trophy: false }))
             : ["今日没有高胜率游资净买入"]),
         "",
         `<b>💰 游资净买入 Top${content.seats.length}</b>（${content.totalSeats}家上榜）`,
-        ...content.seats.map((seat, index) => seatLines(seat, index, { links, stockLimit })),
+        ...content.seats.map((seat, index) => seatLines(seat, index, { links, app, stockLimit })),
         "",
         `<i>${NOTE}</i>`
     ].join("\n");
 }
 
 // 图片说明有1024字上限：超长时先减少净买入排行每家列出的股票数，再减少高胜率游资的股票数，最后减少高胜率游资家数
-function formatHotMoneyCaption(content) {
+function formatHotMoneyCaption(content, { app } = {}) {
     const attempts = [];
     for (let stockLimit = STOCKS_PER_SEAT; stockLimit >= 0; stockLimit--) attempts.push({ stockLimit, highWinStockLimit: STOCKS_PER_SEAT });
     for (let highWinStockLimit = STOCKS_PER_SEAT - 1; highWinStockLimit >= 1; highWinStockLimit--) attempts.push({ stockLimit: 0, highWinStockLimit });
     for (let highWinCount = (content.highWinSeats || []).length - 1; highWinCount >= 0; highWinCount--) attempts.push({ stockLimit: 0, highWinStockLimit: 1, highWinCount });
     for (const options of attempts) {
-        const caption = formatHotMoneyText(content, options);
+        const caption = formatHotMoneyText(content, { ...options, app });
         if (visibleLength(caption) <= PHOTO_CAPTION_LIMIT) return caption;
     }
-    return formatHotMoneyText(content, { stockLimit: 0, highWinStockLimit: 0, highWinCount: 0 });
+    return formatHotMoneyText(content, { app, stockLimit: 0, highWinStockLimit: 0, highWinCount: 0 });
 }
 
 module.exports = {

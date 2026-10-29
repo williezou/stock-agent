@@ -4,6 +4,7 @@ const { createHttpClient, formatError, requestWithRetry } = require("../lib/http
 const { createFundFlowService } = require("../models/market/fund-flow");
 const { isTradingDay } = require("../models/market/trading-calendar");
 const { FundFlowMonitor } = require("../services/fund-flow-monitor");
+const { QuoteApp } = require("../views/quote-app");
 const { generateFundFlowChart } = require("../views/charts/fund-flow-chart");
 const { formatFundFlowAlert, formatFundFlowCaption, fundFlowKeyboard } = require("../views/fund-flow-view");
 
@@ -17,7 +18,7 @@ function createMonitors(fundFlowConfig = config.fundFlow) {
     }));
 }
 
-// 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），图片下方的股票按钮按各自自选股标 ⭐；
+// 推送内容：优先发图表（图片只上传一次，之后的订阅者引用 file_id），图片下方的股票按钮按各自自选股标 ⭐、打开各自选择的行情App；
 // 图表生成失败时退回文字版，保证不漏推。caption/text/keyboard/filePrefix 默认为资金异动，量价异动传入自己的格式
 function prepareDelivery(content, {
     render,
@@ -35,8 +36,8 @@ function prepareDelivery(content, {
         console.error(`⚠️ ${content.label}异动图表生成失败，改发文字：${formatError(error)}`);
     }
     let fileId = null;
-    return async (chatId, watchSymbols) => {
-        const personal = { ...content, watchSymbols };
+    return async (chatId, watchSymbols, appKey) => {
+        const personal = { ...content, watchSymbols, app: QuoteApp.get(appKey) };
         if (!png) return sendMessage(chatId, text(personal));
         const message = await sendPhoto(chatId, fileId || png, caption(personal), `${filePrefix}-${content.time.replace(":", "")}.png`, {
             replyMarkup: keyboard(personal)

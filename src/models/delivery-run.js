@@ -10,7 +10,7 @@ function createDeliveryRunRepository(pool) {
             ? "AND s.longhu_enabled = TRUE"
             : "AND EXISTS (SELECT 1 FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE)";
         const result = await pool.query(
-            `SELECT s.chat_id, s.telegram_user_id, s.username, s.first_name, s.timezone
+            `SELECT s.chat_id, s.telegram_user_id, s.username, s.first_name, s.timezone, s.quote_app
              FROM telegram_subscribers s
              LEFT JOIN daily_delivery_runs r
                 ON r.job_name = $1 AND r.chat_id = s.chat_id AND r.run_date = $2

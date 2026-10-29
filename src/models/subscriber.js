@@ -13,7 +13,7 @@ function createSubscriberRepository(pool) {
                 first_name = COALESCE(EXCLUDED.first_name, telegram_subscribers.first_name),
                 status = 'active',
                 updated_at = NOW()
-             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled`,
+             RETURNING chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled, quote_app`,
             [
                 String(chatId),
                 userId === undefined || userId === null ? null : String(userId),
@@ -25,7 +25,7 @@ function createSubscriberRepository(pool) {
 
     async function getSubscriber(chatId) {
         const result = await pool.query(
-            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled
+            `SELECT chat_id, telegram_user_id, username, first_name, status, timezone, longhu_enabled, fund_flow_enabled, volume_spike_enabled, quote_app
              FROM telegram_subscribers WHERE chat_id = $1`,
             [String(chatId)]
         );
@@ -78,7 +78,7 @@ function createSubscriberRepository(pool) {
     // 资金异动提醒的接收者：开启该提醒的活跃订阅者（盘中多次推送，不经过每日投递任务表）
     async function listFundFlowSubscribers() {
         const result = await pool.query(
-            `SELECT chat_id FROM telegram_subscribers
+            `SELECT chat_id, quote_app FROM telegram_subscribers
              WHERE status = 'active' AND fund_flow_enabled = TRUE
              ORDER BY created_at, chat_id`
         );
@@ -96,11 +96,20 @@ function createSubscriberRepository(pool) {
     // 量价异动提醒的接收者：开启该提醒的活跃订阅者
     async function listVolumeSpikeSubscribers() {
         const result = await pool.query(
-            `SELECT chat_id FROM telegram_subscribers
+            `SELECT chat_id, quote_app FROM telegram_subscribers
              WHERE status = 'active' AND volume_spike_enabled = TRUE
              ORDER BY created_at, chat_id`
         );
         return result.rows;
+    }
+
+    // /app：股票名称链接打开的行情App
+    async function setQuoteApp(chatId, appKey) {
+        const result = await pool.query(
+            "UPDATE telegram_subscribers SET quote_app = $2, updated_at = NOW() WHERE chat_id = $1",
+            [String(chatId), String(appKey)]
+        );
+        return result.rowCount > 0;
     }
 
     // 用户在Telegram里改了用户名或名字时同步（用户名可被删除，置为空；名字缺失时保留原值）
@@ -139,7 +148,7 @@ function createSubscriberRepository(pool) {
     // 管理员 /users：全部订阅者及其推送开关、启用中的自选股（按添加顺序），按注册时间排序
     async function listSubscriberSummaries() {
         const result = await pool.query(
-            `SELECT s.chat_id, s.username, s.first_name, s.status, s.longhu_enabled, s.fund_flow_enabled, s.volume_spike_enabled,
+            `SELECT s.chat_id, s.username, s.first_name, s.status, s.longhu_enabled, s.fund_flow_enabled, s.volume_spike_enabled, s.quote_app,
                     to_char(s.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS created_date,
                     COALESCE((SELECT json_agg(json_build_object('symbol', w.symbol, 'name', w.name) ORDER BY w.created_at, w.symbol)
                               FROM watchlist w WHERE w.chat_id = s.chat_id AND w.enabled = TRUE), '[]'::json) AS watchlist
@@ -171,6 +180,7 @@ function createSubscriberRepository(pool) {
         setFundFlowEnabled,
         setSubscriberBanned,
         setLonghuEnabled,
+        setQuoteApp,
         setVolumeSpikeEnabled,
         updateSubscriberProfile
     };

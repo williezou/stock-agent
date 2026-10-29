@@ -62,6 +62,12 @@ function createMemoryStore(initial = [], registered = true) {
             subscriber.volume_spike_enabled = enabled;
             return true;
         },
+        async setQuoteApp(chatId, appKey) {
+            const subscriber = subscribers.get(String(chatId));
+            if (!subscriber) return false;
+            subscriber.quote_app = appKey;
+            return true;
+        },
         async updateSubscriberProfile(chatId, { username, firstName }) {
             const subscriber = subscribers.get(String(chatId));
             profileUpdates.push(String(chatId));
@@ -435,7 +441,7 @@ test("龙虎榜席位以表格图片发送，画图失败时退回文字", async
     await ok.controller.handleUpdate(privateMessage("/start lhb_002249_20261027"));
     assert.equal(ok.sent.photos.length, 1);
     assert.match(ok.sent.photos[0].caption, /大洋电机.*龙虎榜席位/);
-    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "电脑版"]);
+    assert.deepEqual(ok.sent.photos[0].keyboard.inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "雪球", "招商证券", "电脑版"]);
     assert.deepEqual(ok.sent.texts, []);
 
     const broken = build(() => { throw new Error("未找到可用的中文字体"); });
@@ -527,4 +533,33 @@ test("不同股票的席位互不影响", async () => {
         await controller.handleUpdate({ callback_query: { id: data, from: { id: 200 }, message: { chat: { id: 100, type: "private" } }, data } });
     }
     assert.equal(photos.length, 2);
+});
+
+test("/app 列出可选App并标出当前选择；按钮或参数切换后，回复里的股票链接改用所选App", async () => {
+    const { answered, controller, sent, store } = setup([{ symbol: "600519", name: "贵州茅台" }]);
+    await controller.handleUpdate(privateMessage("/app"));
+    assert.match(sent.at(-1).text, /当前：<b>东方财富<\/b>/);
+    assert.deepEqual(sent.at(-1).options.replyMarkup.inline_keyboard[0], [
+        { text: "✅ 东方财富", callback_data: "app:eastmoney" },
+        { text: "同花顺", callback_data: "app:tonghuashun" },
+        { text: "雪球", callback_data: "app:xueqiu" },
+        { text: "招商证券", callback_data: "app:cmschina" }
+    ]);
+
+    await controller.handleUpdate({ callback_query: { id: "q1", data: "app:xueqiu", message: { chat: { id: 100, type: "private" } } } });
+    assert.equal(answered.at(-1).id, "q1");
+    assert.equal((await store.getSubscriber(100)).quote_app, "xueqiu");
+    assert.match(sent.at(-1).text, /已改为点股票名称打开<b>雪球<\/b>/);
+    await controller.handleUpdate(privateMessage("/list"));
+    assert.match(sent.at(-1).text, /<a href="https:\/\/xueqiu.com\/S\/SH600519">贵州茅台<\/a>/);
+    assert.match(sent.at(-1).text, /点股票名称打开雪球/);
+
+    await controller.handleUpdate(privateMessage("/app 同花顺"));
+    assert.equal((await store.getSubscriber(100)).quote_app, "tonghuashun");
+    await controller.handleUpdate(privateMessage("/add 600519"));
+    assert.match(sent.at(-1).text, /m\.10jqka\.com\.cn\/stockpage\/hs_600519/);
+
+    await controller.handleUpdate(privateMessage("/app 富途"));
+    assert.match(sent.at(-1).text, /可选：东方财富、同花顺、雪球、招商证券/);
+    assert.equal((await store.getSubscriber(100)).quote_app, "tonghuashun", "无法识别时不改");
 });

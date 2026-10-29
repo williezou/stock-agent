@@ -8,6 +8,7 @@ const { alertAdmin } = require("../services/admin-alert");
 const { resolveDailyPage } = require("../services/daily-page");
 const { sendAndRecord } = require("../services/tracked-delivery");
 const { generateLonghuChart } = require("../views/charts/longhu-chart");
+const { QuoteApp } = require("../views/quote-app");
 const { formatLonghuCaption, formatLonghuKeyboard, formatLonghuMessage } = require("../views/longhu-view");
 
 // 龙虎榜推送控制器：交易所在收盘后傍晚（约16:00-20:00）分批发布龙虎榜，且接口没有“发布完成”标记。
@@ -109,15 +110,17 @@ async function buildContent({ dateStr, board, getBotUsername, render, sendMessag
         const caption = formatLonghuCaption({ date: dateStr, board });
         const replyMarkup = formatLonghuKeyboard({ date: dateStr, board });
         let fileId = null;
-        const send = async chatId => {
-            const message = await sendPhoto(chatId, fileId || png, caption, `longhu-${dateStr}.png`, { replyMarkup });
+        const send = async subscriber => {
+            const message = await sendPhoto(subscriber.chat_id, fileId || png, caption, `longhu-${dateStr}.png`, { replyMarkup });
             fileId = fileId || telegram.largestPhotoFileId(message);
         };
         return { kind: "chart", send };
     } catch (error) {
         console.error(`⚠️ 龙虎榜图表生成失败，改发文字：${formatError(error)}`);
-        const text = formatLonghuMessage({ date: dateStr, board, botUsername: await getBotUsername() });
-        return { kind: "text", send: chatId => sendMessage(chatId, text) };
+        // 文字版的股票名称链接按各自选择的App
+        const botUsername = await getBotUsername();
+        const text = QuoteApp.memo(app => formatLonghuMessage({ date: dateStr, board, botUsername, app }));
+        return { kind: "text", send: subscriber => sendMessage(subscriber.chat_id, text(QuoteApp.forSubscriber(subscriber))) };
     }
 }
 
@@ -131,7 +134,7 @@ async function deliverToSubscribers(store, subscribers, { dateStr, send, final }
                 jobName: JOB_NAME,
                 chatId,
                 runDate: dateStr,
-                send: withFinalRetry(() => send(chatId), final),
+                send: withFinalRetry(() => send(subscriber), final),
                 finalAttempt: final
             });
             totals[outcome]++;
@@ -217,7 +220,7 @@ async function runLonghuTick(store, now = new Date(), services = {}) {
         try {
             await page.publishLonghu({ date: dateStr, board, botUsername: await getBotUsername(), render });
             content.kind = "page";
-            content.send = async chatId => { await page.publishIndex(await store.getSubscriber(chatId), dateStr); };
+            content.send = async subscriber => { await page.publishIndex(await store.getSubscriber(subscriber.chat_id), dateStr); };
         } catch (error) {
             console.error(`⚠️ 龙虎榜网页写入失败，改为推送图片：${formatError(error)}`);
         }

@@ -169,7 +169,7 @@ test("量价异动推送：文字版每行含触发时间、变化、成交额�
     assert.match(text, /沪市上交所、深市新浪财经/);
 
     const caption = formatVolumeSpikeCaption(content);
-    assert.match(caption, /^<b>⚡ 上午量价异动｜10:00-10:15<\/b>\n<i>点下方按钮打开东方财富App。\/spike off 关闭提醒<\/i>$/);
+    assert.match(caption, /^<b>⚡ 上午量价异动｜10:00-10:15<\/b>\n<i>点下方按钮打开东方财富。\/spike off 关闭提醒<\/i>$/);
     const keyboard = volumeSpikeKeyboard({ ...content, watchSymbols: new Set(["000001"]) });
     assert.deepEqual(keyboard.inline_keyboard.map(row => row.map(button => button.text)), [["📈浦发银行", "📉平安银行⭐"]]);
     assert.equal(generateVolumeSpikeChart(content).subarray(1, 4).toString(), "PNG");

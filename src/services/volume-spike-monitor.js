@@ -188,7 +188,7 @@ class VolumeSpikeMonitor {
         for (const subscriber of subscribers) {
             const chatId = subscriber.chat_id;
             try {
-                await send(chatId, await deps.listWatchSymbols(chatId));
+                await send(chatId, await deps.listWatchSymbols(chatId), subscriber.quote_app);
                 totals.delivered++;
             } catch (error) {
                 if (deps.isBotBlocked(error)) {

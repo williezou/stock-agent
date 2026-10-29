@@ -8,6 +8,7 @@ const { buildReports } = require("../services/daily-report");
 const { deliverDailyClose } = require("../services/report-delivery");
 const { sendAndRecord } = require("../services/tracked-delivery");
 const { closeMessage, dailyPageButton } = require("../views/daily-page-view");
+const { QuoteApp } = require("../views/quote-app");
 const { StockLink } = require("../views/stock-link");
 
 // 每日收盘调度控制器：工作日北京时间15:30-18:00轮询，为每个订阅者领取并投递当日报告
@@ -129,7 +130,9 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             .then(alerts => page.publishIntraday(dateStr, alerts))
             .catch(error => console.error(`⚠️ 盘中异动回顾写入失败：${error.message}`));
     }
-    async function deliverReports(chatId, reports) {
+    async function deliverReports(subscriber, reports) {
+        const chatId = subscriber.chat_id;
+        const app = QuoteApp.forSubscriber(subscriber);
         if (page) {
             let url = null;
             try {
@@ -137,9 +140,9 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             } catch (error) {
                 console.error(`⚠️ ${chatId}的每日总结网页写入失败，改为逐条推送：${error.message}`);
             }
-            if (url) return notify(chatId, closeMessage({ reports, date: result.date }), { replyMarkup: dailyPageButton(url) });
+            if (url) return notify(chatId, closeMessage({ reports, date: result.date, app }), { replyMarkup: dailyPageButton(url) });
         }
-        return deliver({ chatId, reports, date: result.date });
+        return deliver({ chatId, reports, date: result.date, app });
     }
 
     const reportBySymbol = new Map(result.reports.map(report => [report.meta.symbol, report]));
@@ -184,13 +187,13 @@ async function runSchedulerTick(store, now = new Date(), services = {}) {
             jobName: JOB_NAME,
             chatId,
             runDate: dateStr,
-            send: () => deliverReports(chatId, reports),
+            send: () => deliverReports(recipient.subscriber, reports),
             doneMessage: missing.length ? `部分发送，缺少：${missing.map(target => target.symbol).join(",")}` : result.date
         });
         if (outcome !== "delivered") return outcome;
         if (missing.length) {
             // The report is already delivered; a failed notice must not trigger a full resend.
-            const names = missing.map(target => StockLink.of(target).html());
+            const names = missing.map(target => StockLink.of(target, QuoteApp.forSubscriber(recipient.subscriber)).html());
             await notify(chatId, `⚠️ 以下股票今日没有完整日K，本次未包含：\n${names.join("\n")}`)
                 .catch(error => console.error(`⚠️ 向${chatId}发送缺失提示失败：${error.message}`));
         }

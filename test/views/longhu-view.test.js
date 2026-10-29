@@ -72,7 +72,7 @@ test("图片说明只含概况；股票按钮每行3个，净卖出另起一行�
     assert.ok(rows.flat().every(button => Buffer.byteLength(button.callback_data) <= 64), "回调数据不超过64字节");
     assert.deepEqual(parseLonghuCallbackData("lhb:600100:20261027"), { symbol: "600100", date: "2026-10-27" });
     assert.equal(parseLonghuCallbackData("delete:600100"), null);
-    assert.deepEqual(formatSeatKeyboard({ date: "2026-10-27", symbol: "002249" }).inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "电脑版"]);
+    assert.deepEqual(formatSeatKeyboard({ date: "2026-10-27", symbol: "002249" }).inline_keyboard[0].map(button => button.text), ["东方财富", "同花顺", "雪球", "招商证券", "电脑版"]);
 });
 
 test("可见长度不计HTML标签与链接地址，实体按一个字计", () => {

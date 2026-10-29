@@ -67,13 +67,13 @@ test("入口页按推送开关列出各段：关掉的提醒不出现；页面�
     assert.match(html, /<meta name="robots" content="noindex, nofollow">/);
     assert.match(html, /<title>每日总结｜2026-10-28<\/title>/);
     assert.match(html, new RegExp(`data-src="http://pages.test/p/${token}/close.html"`));
-    assert.match(html, /data-src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/intraday.html"/, "量价异动开着，回顾仍在");
-    assert.doesNotMatch(html, /longhu\.html|hot-money\.html/, "龙虎榜关闭");
+    assert.match(html, /data-src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/intraday\.eastmoney\.html"/, "量价异动开着，回顾仍在；没选过App时用东方财富那份");
+    assert.doesNotMatch(html, /longhu\.|hot-money\./, "龙虎榜关闭");
 
-    await dailyPage.publishIndex({ chat_id: "200", fund_flow_enabled: false, volume_spike_enabled: false }, "2026-10-28");
+    await dailyPage.publishIndex({ chat_id: "200", fund_flow_enabled: false, volume_spike_enabled: false, quote_app: "xueqiu" }, "2026-10-28");
     const other = read(`p/${pageToken("200", "2026-10-28")}/index.html`);
-    assert.doesNotMatch(other, /intraday\.html/, "两种盘中提醒都关了");
-    assert.match(other, /s\/[0-9a-f]{32}\/longhu\.html[^]*s\/[0-9a-f]{32}\/hot-money\.html/);
+    assert.doesNotMatch(other, /intraday\./, "两种盘中提醒都关了");
+    assert.match(other, /s\/[0-9a-f]{32}\/longhu\.xueqiu\.html[^]*s\/[0-9a-f]{32}\/hot-money\.xueqiu\.html/, "选了雪球，引用雪球那份");
 });
 
 test("自选股收盘：K线图所有用户共用、只写一次；图表生成失败时卡片只有文字", async () => {
@@ -147,12 +147,14 @@ test("推送消息：收盘为每只一行概况，龙虎榜更新附游资要�
     assert.deepEqual(view.dailyPageButton("https://x/p"), { inline_keyboard: [[{ text: "📄 打开今日总结", url: "https://x/p" }]] });
 });
 
-test("龙虎榜与游资写入共用目录：图表失败时只写明细", async () => {
+test("龙虎榜与游资写入共用目录，按App各写一份明细、图片只写一份：图表失败时只写明细", async () => {
     const board = [{ symbol: "600000", name: "沪股", changePct: 10, netAmount: 1e8, reason: "涨幅偏离" }];
     await dailyPage.publishLonghu({ date: "2026-10-26", board, botUsername: "bot", render: () => Buffer.from("png") });
-    assert.match(read(`s/${sharedToken("2026-10-26")}/longhu.html`), /<img src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/longhu.png"/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/longhu.eastmoney.html`), /<img src="http:\/\/pages.test\/s\/[0-9a-f]{32}\/longhu.png"/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/longhu.xueqiu.html`), /<a href="https:\/\/xueqiu.com\/S\/SH600000">沪股<\/a>/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/longhu.tonghuashun.html`), /m\.10jqka\.com\.cn\/stockpage\/hs_600000/);
     await dailyPage.publishHotMoney({ date: "2026-10-26", content: { date: "2026-10-26", totalSeats: 0, seats: [], highWinSeats: [] }, render: () => { throw new Error("不应画图"); } });
-    assert.doesNotMatch(read(`s/${sharedToken("2026-10-26")}/hot-money.html`), /<img /);
+    assert.doesNotMatch(read(`s/${sharedToken("2026-10-26")}/hot-money.eastmoney.html`), /<img /);
     await dailyPage.publishIntraday("2026-10-26", []);
-    assert.match(read(`s/${sharedToken("2026-10-26")}/intraday.html`), /今日没有盘中异动推送/);
+    assert.match(read(`s/${sharedToken("2026-10-26")}/intraday.tonghuashun.html`), /今日没有盘中异动推送/);
 });

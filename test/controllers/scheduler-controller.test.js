@@ -31,7 +31,7 @@ test("多用户股票合并分析后按各自列表独立投递", async () => {
     const completed = [];
     const delivered = [];
     const store = {
-        async listDueSubscribers() { return [{ chat_id: "100" }, { chat_id: "200" }]; },
+        async listDueSubscribers() { return [{ chat_id: "100" }, { chat_id: "200", quote_app: "xueqiu" }]; },
         async list(chatId) { return lists.get(String(chatId)) || []; },
         async claimDeliveryRun() { return 1; },
         async completeDeliveryRun(_job, chatId, _date, status) { completed.push({ chatId, status }); },
@@ -47,14 +47,14 @@ test("多用户股票合并分析后按各自列表独立投递", async () => {
                 reports: targets.map(meta => ({ meta }))
             };
         },
-        async deliverDailyClose({ chatId, reports }) {
-            delivered.push({ chatId, symbols: reports.map(report => report.meta.symbol) });
+        async deliverDailyClose({ chatId, reports, app }) {
+            delivered.push({ chatId, symbols: reports.map(report => report.meta.symbol), app: app.key });
         },
         async sendMessage() {}
     });
     assert.deepEqual(delivered, [
-        { chatId: "100", symbols: ["600887", "002380"] },
-        { chatId: "200", symbols: ["002380", "600519"] }
+        { chatId: "100", symbols: ["600887", "002380"], app: "eastmoney" },
+        { chatId: "200", symbols: ["002380", "600519"], app: "xueqiu" }
     ]);
     assert.deepEqual(completed, [
         { chatId: "100", status: "done" },

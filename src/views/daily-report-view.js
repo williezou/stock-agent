@@ -1,7 +1,7 @@
 const { PHOTO_CAPTION_LIMIT } = require("../constants");
 const { visibleLength } = require("../lib/telegram-text");
 const { escapeHtml, linkLine, money, number, shortText, signed } = require("./format");
-const { STOCK_LINK_LEGEND, StockLink } = require("./stock-link");
+const { StockLink, stockLinkLegend } = require("./stock-link");
 
 // 每日收盘报告的展示：总览图说明（每页两只股票）与个股图说明
 const OVERVIEW_PAGE_SIZE = 2;
@@ -11,7 +11,7 @@ const STOCK_FOCUS = {
     "002380": "关注工业AI/机器人兑现与高换手风险"
 };
 
-function formatStockCaption(report, date) {
+function formatStockCaption(report, date, app) {
     const { meta, analysis, plan, news = [], announcements = [] } = report;
     const { latest, ma, macd, rsi, kdj, bollinger } = analysis;
     const catalyst = [...announcements, ...news].find(item => item && item.title);
@@ -22,9 +22,9 @@ function formatStockCaption(report, date) {
         ? `📰 ${escapeHtml(shortText(catalyst.title))}`
         : catalystLine;
     const focus = STOCK_FOCUS[meta.symbol] || "关注量能能否延续与板块情绪变化";
-    const sourceLine = `🔗 ${STOCK_LINK_LEGEND}`;
+    const sourceLine = `🔗 ${stockLinkLegend(app)}`;
     const lines = [
-        `${StockLink.of(meta).html({ bold: true, code: false })} <code>${escapeHtml(meta.exchangeCode)}</code>｜${escapeHtml(date)}`,
+        `${StockLink.of(meta, app).html({ bold: true, code: false })} <code>${escapeHtml(meta.exchangeCode)}</code>｜${escapeHtml(date)}`,
         `💰 收 ${number(latest.close)}元 ${signed(latest.changePct)}｜开/高/低 ${number(latest.open)}/${number(latest.high)}/${number(latest.low)}`,
         `📊 成交额 ${money(latest.amount)}｜换手 ${number(latest.turnover)}%｜5日量比 ${number(analysis.volumeRatio)}x`,
         `🟥涨K　🟩跌K　🟧MA5　🟦MA20　🟢支撑　🔴压力`,
@@ -47,26 +47,26 @@ function formatStockCaption(report, date) {
     return caption;
 }
 
-function formatOverviewRow(report) {
+function formatOverviewRow(report, app) {
     const { meta, analysis, plan } = report;
     const latest = analysis.latest;
-    return `${StockLink.of(meta).html({ bold: true, code: false })}　${number(latest.close)}元 ${signed(latest.changePct)}　量比${number(analysis.volumeRatio)}x　<b>${plan.recommendation}</b>`;
+    return `${StockLink.of(meta, app).html({ bold: true, code: false })}　${number(latest.close)}元 ${signed(latest.changePct)}　量比${number(analysis.volumeRatio)}x　<b>${plan.recommendation}</b>`;
 }
 
-function formatOverviewCaption(reports, date) {
+function formatOverviewCaption(reports, date, app) {
     return [
         `<b>A股每日收盘图览｜${escapeHtml(date)}</b>`,
-        ...reports.map(formatOverviewRow),
+        ...reports.map(report => formatOverviewRow(report, app)),
         "红涨、绿跌；橙色MA5；下方为成交量；虚线为支撑与压力。"
     ].join("\n");
 }
 
-function formatDailyCloseDelivery({ reports, date }) {
+function formatDailyCloseDelivery({ reports, date, app }) {
     const overviewPages = [];
     for (let index = 0; index < reports.length; index += OVERVIEW_PAGE_SIZE) {
         const pageReports = reports.slice(index, index + OVERVIEW_PAGE_SIZE);
         overviewPages.push({
-            caption: formatOverviewCaption(pageReports, date),
+            caption: formatOverviewCaption(pageReports, date, app),
             filename: `overview-${date}-${overviewPages.length + 1}.png`,
             reports: pageReports
         });
@@ -74,7 +74,7 @@ function formatDailyCloseDelivery({ reports, date }) {
     return {
         overviews: overviewPages,
         stocks: reports.map(report => ({
-            caption: formatStockCaption(report, date),
+            caption: formatStockCaption(report, date, app),
             filename: `${report.meta.symbol}-${date}.png`,
             report
         }))

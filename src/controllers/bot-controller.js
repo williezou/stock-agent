@@ -2,6 +2,7 @@ const { config } = require("../config");
 const { formatError } = require("../lib/http");
 const { buildTarget, normalizeSymbol } = require("../models/stock");
 const view = require("../views/bot-view");
+const { QuoteApp } = require("../views/quote-app");
 const { generateSeatChart } = require("../views/charts/seat-chart");
 const {
     formatSeatCaption,
@@ -148,10 +149,10 @@ function createBotController({
         }
     }
 
-    async function showList(chatId) {
+    async function showList(chatId, app) {
         const targets = await store.list(chatId);
         if (!targets.length) return reply(chatId, MESSAGES.emptyList);
-        return reply(chatId, view.watchlistText(targets, maxStocks));
+        return reply(chatId, view.watchlistText(targets, maxStocks, app));
     }
 
     async function promptAdd(chatId) {
@@ -159,13 +160,13 @@ function createBotController({
         return sendMessage(chatId, MESSAGES.addPrompt, { replyMarkup: view.addPromptMarkup() });
     }
 
-    async function addStock(chatId, input) {
+    async function addStock(chatId, input, app) {
         const symbol = normalizeSymbol(input);
         if (!symbol) return sendMessage(chatId, MESSAGES.invalidAddCode);
         const existing = await store.get(chatId, symbol);
         if (existing) {
             await store.clearSession(chatId);
-            return reply(chatId, view.alreadyTrackedText(symbol, existing.name));
+            return reply(chatId, view.alreadyTrackedText(symbol, existing.name, app));
         }
         const current = await store.list(chatId);
         if (current.length >= maxStocks) {
@@ -176,7 +177,7 @@ function createBotController({
         if (profile.symbol !== symbol) throw new Error(`行情接口返回的代码与${symbol}不一致`);
         await store.upsert(chatId, buildTarget(symbol, profile.name));
         await store.clearSession(chatId);
-        return reply(chatId, view.addedText(symbol, profile.name));
+        return reply(chatId, view.addedText(symbol, profile.name, app));
     }
 
     async function showRemoveChoices(chatId) {
@@ -216,42 +217,56 @@ function createBotController({
         return reply(chatId, view.volumeSpikeToggledText(enabled));
     }
 
+    // /app 列出可选App（按钮选择），/app 同花顺 直接设置
+    async function chooseQuoteApp(chatId, argument, subscriber) {
+        const current = QuoteApp.forSubscriber(subscriber);
+        if (!argument.trim()) return sendMessage(chatId, view.appChoiceText(current), { replyMarkup: view.appChoiceMarkup(current) });
+        const app = QuoteApp.find(argument);
+        if (!app) return reply(chatId, MESSAGES.invalidAppArgument);
+        return setQuoteApp(chatId, app);
+    }
+
+    async function setQuoteApp(chatId, app) {
+        await store.setQuoteApp(chatId, app.key);
+        return reply(chatId, view.appChangedText(app));
+    }
+
     // 龙虎榜推送里点击股票名称（t.me 深层链接）后，回复该股当日的买卖席位明细
     // 同一会话对同一只股票同一天的席位：生成中或冷却期内不重复发送。
     // onAccepted / onBlocked 在开始处理前调用（按钮点击需立即应答，避免生成期间按钮一直转圈引发重按）
-    async function showLonghuSeatsOnce(chatId, query, { onAccepted = async () => {}, onBlocked = async () => {} } = {}) {
+    async function showLonghuSeatsOnce(chatId, query, app, { onAccepted = async () => {}, onBlocked = async () => {} } = {}) {
         const key = `${chatId}:${query.symbol}:${query.date}`;
         const blocked = seatRequestBlocked(key);
         if (blocked) return onBlocked(blocked);
         seatRequests.set(key, { pending: true, at: now() });
         try {
             await onAccepted();
-            return await showLonghuSeats(chatId, query);
+            return await showLonghuSeats(chatId, query, app);
         } finally {
             seatRequests.set(key, { pending: false, at: now() });
         }
     }
 
-    async function showLonghuSeats(chatId, { symbol, date }) {
+    async function showLonghuSeats(chatId, { symbol, date }, app) {
         let detail = null;
         try {
             detail = longhuService ? await longhuService.getSeatDetails(date, symbol) : null;
         } catch (error) {
             console.error(`⚠️ 龙虎榜席位查询失败（${symbol} ${date}）：${formatError(error)}`);
         }
-        if (!detail) return reply(chatId, formatSeatNotFound({ date, symbol }));
+        if (!detail) return reply(chatId, formatSeatNotFound({ date, symbol, app }));
         // 席位以表格图片展示；画图失败或未注入发图函数时退回文字版
         if (sendPhoto) {
             try {
                 const png = renderSeatChart({ date, detail });
                 return await sendPhoto(chatId, png, formatSeatCaption({ date, detail }), `lhb-${symbol}-${date}.png`, {
-                    replyMarkup: formatSeatKeyboard({ date, symbol })
+                    replyMarkup: formatSeatKeyboard({ date, symbol, app })
                 });
             } catch (error) {
                 console.error(`⚠️ 龙虎榜席位表格发送失败，改发文字（${symbol} ${date}）：${formatError(error)}`);
             }
         }
-        return reply(chatId, formatSeatDetail({ date, detail }));
+        return reply(chatId, formatSeatDetail({ date, detail, app }));
     }
 
     async function handleMessage(message) {
@@ -270,7 +285,7 @@ function createBotController({
         if (seatQuery) {
             // 深层链接只给已订阅的用户查看；其他人按未注册处理，不把链接参数当成邀请码
             if (isAdmin(chatId) || await isActiveSubscriber(chatId)) {
-                return showLonghuSeatsOnce(chatId, seatQuery);
+                return showLonghuSeatsOnce(chatId, seatQuery, QuoteApp.forSubscriber(subscriber));
             }
             return sendMessage(chatId, inviteCode ? MESSAGES.registerWithInvite : MESSAGES.registerFirst);
         }
@@ -298,7 +313,8 @@ function createBotController({
             await store.clearSession(chatId);
             return reply(chatId, MESSAGES.cancelled);
         }
-        if (text === LEGACY_BUTTONS.LIST || isCommand(text, "list")) return showList(chatId);
+        const app = QuoteApp.forSubscriber(subscriber);
+        if (text === LEGACY_BUTTONS.LIST || isCommand(text, "list")) return showList(chatId, app);
         if (text === LEGACY_BUTTONS.ADD) return promptAdd(chatId);
         if (text === LEGACY_BUTTONS.REMOVE) return showRemoveChoices(chatId);
 
@@ -308,39 +324,45 @@ function createBotController({
         if (flowArgument !== null) return setFundFlowPush(chatId, flowArgument, subscriber);
         const spikeArgument = commandArgument(text, "spike");
         if (spikeArgument !== null) return setVolumeSpikePush(chatId, spikeArgument, subscriber);
+        const appArgument = commandArgument(text, "app");
+        if (appArgument !== null) return chooseQuoteApp(chatId, appArgument, subscriber);
 
         const addArgument = commandArgument(text, "add");
-        if (addArgument !== null) return addArgument ? addStock(chatId, addArgument) : promptAdd(chatId);
+        if (addArgument !== null) return addArgument ? addStock(chatId, addArgument, app) : promptAdd(chatId);
         const removeArgument = commandArgument(text, "remove");
         if (removeArgument !== null) return removeArgument ? removeStock(chatId, removeArgument) : showRemoveChoices(chatId);
 
         // 多步对话：上一步是“添加股票”时，把这条消息当作股票代码
-        if (await store.getSession(chatId) === "add") return addStock(chatId, text);
+        if (await store.getSession(chatId) === "add") return addStock(chatId, text, app);
         return reply(chatId, MESSAGES.unknownCommand);
     }
 
-    // 删除流程：delete:代码 → 二次确认 → delete_confirm:代码
+    // 删除流程：delete:代码 → 二次确认 → delete_confirm:代码；/app 的选择按钮：app:平台
     async function handleCallback(query) {
         const chatId = query.message && query.message.chat && query.message.chat.id;
-        if (!chatId || !isPrivateChat(query.message?.chat) || !await isActiveSubscriber(chatId)) {
+        const subscriber = chatId && isPrivateChat(query.message?.chat) ? await store.getSubscriber(chatId) : null;
+        if (subscriber?.status !== "active") {
             return answerCallback(query.id, { text: MESSAGES.unauthorizedCallback, showAlert: true });
         }
+        const app = QuoteApp.forSubscriber(subscriber);
         const data = String(query.data || "");
         // 龙虎榜推送图片下方的股票名称按钮：重复点击时只弹出提示
         const seatQuery = parseLonghuCallbackData(data);
         if (seatQuery) {
-            return showLonghuSeatsOnce(chatId, seatQuery, {
+            return showLonghuSeatsOnce(chatId, seatQuery, app, {
                 onAccepted: () => answerCallback(query.id),
                 onBlocked: text => answerCallback(query.id, { text })
             });
         }
         await answerCallback(query.id);
+        const chosenApp = view.parseAppCallbackData(data);
+        if (chosenApp) return setQuoteApp(chatId, chosenApp);
         if (data === "delete_cancel") return reply(chatId, MESSAGES.removeCancelled);
         if (data.startsWith("delete:")) {
             const symbol = normalizeSymbol(data.slice("delete:".length));
             const target = symbol && await store.get(chatId, symbol);
             if (!target) return reply(chatId, MESSAGES.alreadyRemoved);
-            return sendMessage(chatId, view.confirmRemoveText(symbol, target.name), {
+            return sendMessage(chatId, view.confirmRemoveText(symbol, target.name, app), {
                 replyMarkup: view.confirmRemoveMarkup(symbol)
             });
         }

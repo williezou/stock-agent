@@ -3,11 +3,13 @@ const { config } = require("../config");
 const { formatError } = require("../lib/http");
 const { publicUrl, putObject } = require("../gateways/page-storage");
 const { generateStockChart } = require("../views/charts/stock-charts");
+const { QuoteApp } = require("../views/quote-app");
 const view = require("../views/daily-page-view");
 
 // 每日总结网页：每个用户每天一个入口页，地址里的令牌由 DAILY_PAGE_SECRET 按用户与日期生成（别人猜不到，同一天重复写入地址不变）。
 // 用户自己的内容（入口页、自选股收盘）放在 p/令牌/ 下；行情类内容所有用户共用，放在 s/按日期生成的令牌/ 下，只写一次
 // （共用目录也用令牌，不拿到链接就猜不到任何文件地址，存储桶又禁止列目录，避免被人刷流量）。
+// 共用片段里有股票名称链接，按行情App各写一份（*.<app>.html），入口页引用用户所选App的那份；图片不分App。
 // 保留期由存储桶的生命周期规则控制（7天）
 const HTML = "text/html; charset=utf-8";
 const PNG = "image/png";
@@ -29,8 +31,14 @@ function sharedToken(date) {
 const paths = {
     index: (chatId, date) => `p/${pageToken(chatId, date)}/index.html`,
     close: (chatId, date) => `p/${pageToken(chatId, date)}/close.html`,
-    shared: (date, name) => `s/${sharedToken(date)}/${name}`
+    shared: (date, name) => `s/${sharedToken(date)}/${name}`,
+    sharedHtml: (date, name, app) => `s/${sharedToken(date)}/${name}.${app.key}.html`
 };
+
+// 共用片段按App各写一份
+async function putSharedHtml(date, name, render) {
+    for (const app of QuoteApp.all) await putObject(paths.sharedHtml(date, name, app), render(app), { contentType: HTML });
+}
 
 function pageUrl(chatId, date) {
     return publicUrl(paths.index(chatId, date));
@@ -39,14 +47,15 @@ function pageUrl(chatId, date) {
 // 入口页按用户的推送开关列出各段；各段内容还没写入时显示预计时间
 async function publishIndex(subscriber, date) {
     const chatId = subscriber.chat_id;
+    const app = QuoteApp.forSubscriber(subscriber);
     const sections = [{ id: "close", title: "📊 自选股收盘", url: publicUrl(paths.close(chatId, date)), pending: "收盘报告约15:30后生成（自选股为空时没有）" }];
     if (subscriber.fund_flow_enabled !== false || subscriber.volume_spike_enabled !== false) {
-        sections.push({ id: "intraday", title: "⚡ 盘中异动回顾", url: publicUrl(paths.shared(date, "intraday.html")), pending: "收盘后汇总" });
+        sections.push({ id: "intraday", title: "⚡ 盘中异动回顾", url: publicUrl(paths.sharedHtml(date, "intraday", app)), pending: "收盘后汇总" });
     }
     if (subscriber.longhu_enabled !== false) {
         sections.push(
-            { id: "longhu", title: "🐉 龙虎榜", url: publicUrl(paths.shared(date, "longhu.html")), pending: "龙虎榜约18:00-20:30发布后更新" },
-            { id: "hot-money", title: "🐯 游资动向", url: publicUrl(paths.shared(date, "hot-money.html")), pending: "龙虎榜发布后更新" }
+            { id: "longhu", title: "🐉 龙虎榜", url: publicUrl(paths.sharedHtml(date, "longhu", app)), pending: "龙虎榜约18:00-20:30发布后更新" },
+            { id: "hot-money", title: "🐯 游资动向", url: publicUrl(paths.sharedHtml(date, "hot-money", app)), pending: "龙虎榜发布后更新" }
         );
     }
     await putObject(paths.index(chatId, date), view.dailyPageHtml({ date, sections }), { contentType: HTML });
@@ -77,24 +86,24 @@ async function stockChartUrl(report, date) {
 async function publishClose(subscriber, { reports, date }) {
     const chartUrls = new Map();
     for (const report of reports) chartUrls.set(report.meta.symbol, await stockChartUrl(report, date));
-    await putObject(paths.close(subscriber.chat_id, date), view.closeFragment({ reports, date, chartUrls }), { contentType: HTML });
+    await putObject(paths.close(subscriber.chat_id, date), view.closeFragment({ reports, date, chartUrls, app: QuoteApp.forSubscriber(subscriber) }), { contentType: HTML });
     return publishIndex(subscriber, date);
 }
 
 async function publishIntraday(date, alerts) {
-    await putObject(paths.shared(date, "intraday.html"), view.intradayFragment({ alerts }), { contentType: HTML });
+    await putSharedHtml(date, "intraday", app => view.intradayFragment({ alerts, app }));
 }
 
 async function publishLonghu({ date, board, botUsername, render }) {
     const chartUrl = await putChart(paths.shared(date, "longhu.png"), () => render({ date, board }));
-    await putObject(paths.shared(date, "longhu.html"), view.longhuFragment({ date, board, botUsername, chartUrl }), { contentType: HTML });
+    await putSharedHtml(date, "longhu", app => view.longhuFragment({ date, board, botUsername, chartUrl, app }));
 }
 
 async function publishHotMoney({ date, content, render }) {
     const chartUrl = content.seats.length || content.highWinSeats.length
         ? await putChart(paths.shared(date, "hot-money.png"), () => render(content))
         : null;
-    await putObject(paths.shared(date, "hot-money.html"), view.hotMoneyFragment({ content, chartUrl }), { contentType: HTML });
+    await putSharedHtml(date, "hot-money", app => view.hotMoneyFragment({ content, chartUrl, app }));
 }
 
 const dailyPage = { pageUrl, publishClose, publishHotMoney, publishIndex, publishIntraday, publishLonghu };

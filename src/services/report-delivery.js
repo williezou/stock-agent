@@ -10,9 +10,9 @@ const { formatScanDelivery, formatScanSummary } = require("../views/scan-view");
 const SEND_GAP_MS = 350;
 const SUMMARY_RETRY_DELAY_MS = 2000;
 
-// 每日收盘报告：先发总览图，再逐只发个股图；dryRun时只在控制台打印
-async function deliverDailyClose({ chatId, reports, date, dryRun = false }) {
-    const delivery = formatDailyCloseDelivery({ reports, date });
+// 每日收盘报告：先发总览图，再逐只发个股图；dryRun时只在控制台打印。app：股票名称链接打开的行情App
+async function deliverDailyClose({ chatId, reports, date, app, dryRun = false }) {
+    const delivery = formatDailyCloseDelivery({ reports, date, app });
     if (dryRun) {
         delivery.overviews.forEach((item, index) => {
             const overviewChart = generateOverviewChart(item.reports, date);
