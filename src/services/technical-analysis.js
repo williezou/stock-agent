@@ -1,3 +1,5 @@
+const { computeChipDistribution } = require("./chip-distribution");
+
 function average(values) {
     if (!values.length) return null;
     return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -166,7 +168,9 @@ function analyzeKlines(klines) {
         recentHigh20,
         support,
         resistance,
-        weightedClose20: weightedClose(recent20)
+        weightedClose20: weightedClose(recent20),
+        // 筹码分布用全部日K（约140天）估算；缺换手率时为 null
+        chips: computeChipDistribution(rows)
     };
 }
 

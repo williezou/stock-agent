@@ -1,6 +1,6 @@
 const { COLORS, Raster, encodePng } = require("./raster");
 
-// 股票图表：个股30日K线详图与每页两只股票的总览卡片图
+// 股票图表：个股30日K线详图（右侧为筹码分布）与每页两只股票的总览卡片图
 function rollingAverage(rows, period, field) {
     return rows.map((_, index) => {
         if (index + 1 < period) return null;
@@ -20,6 +20,24 @@ function rollingBollinger(rows, period = 20) {
     });
 }
 
+// 筹码分布：每个价位一条横向柱（收盘价以下为获利盘红色、以上为套牢盘蓝灰），橙色虚线为平均成本；
+// 只画K线价格范围内的部分，下方标平均成本与获利盘比例
+function drawChips(image, chips, { left, right, top, bottom, minPrice, maxPrice, yAt }) {
+    const visible = chips.prices.map((price, i) => ({ price, weight: chips.weights[i] })).filter(item => item.price >= minPrice && item.price <= maxPrice);
+    const maxWeight = Math.max(...visible.map(item => item.weight), 1e-9);
+    // 柱高等于相邻两档在图上的间距，柱子刚好铺满、不留缝也不重叠
+    const rowHeight = Math.max(2, Math.ceil(Math.abs(yAt(chips.prices[0]) - yAt(chips.prices[1]))));
+    image.text("CHIPS", left, top - 22, 2, COLORS.muted);
+    for (const item of visible) {
+        const width = (item.weight / maxWeight) * (right - left);
+        if (width < 1) continue;
+        image.fillRect(left, yAt(item.price) - rowHeight / 2, width, rowHeight, item.price <= chips.close ? COLORS.up : COLORS.boll);
+    }
+    if (chips.avgCost >= minPrice && chips.avgCost <= maxPrice) image.line(left - 8, yAt(chips.avgCost), right, yAt(chips.avgCost), COLORS.ma5, 2, true);
+    image.text(`AVG ${chips.avgCost.toFixed(2)}`, left - 4, bottom + 26, 2, COLORS.ma5);
+    image.text(`PROFIT ${Math.round(chips.profitRatio * 100)}%`, left - 4, bottom + 48, 2, COLORS.muted);
+}
+
 function generateStockChart(report) {
     const width = 1080;
     const height = 720;
@@ -31,8 +49,11 @@ function generateStockChart(report) {
     const ma5 = rollingAverage(rows, 5, "close");
     const ma20 = rollingAverage(rows, 20, "close");
     const boll = rollingBollinger(rows, 20);
-    const plot = { left: 84, right: 1040, top: 98, bottom: 470 };
-    const volumePlot = { left: 84, right: 1040, top: 535, bottom: 660 };
+    // 有筹码数据时K线与成交量收窄，右侧留给筹码分布（与K线共用价格刻度）
+    const chips = report.analysis.chips;
+    const chartRight = chips ? 900 : 1040;
+    const plot = { left: 84, right: chartRight, top: 98, bottom: 470 };
+    const volumePlot = { left: 84, right: chartRight, top: 535, bottom: 660 };
     const rangeValues = rows.flatMap(row => [row.low, row.high]);
     for (const item of boll) {
         if (item) rangeValues.push(item.lower, item.upper);
@@ -104,8 +125,9 @@ function generateStockChart(report) {
     image.text("SUPPORT", 506, 488, 2, COLORS.muted);
     image.fillRect(674, 493, 22, 4, COLORS.resistance);
     image.text("RESIST", 706, 488, 2, COLORS.muted);
+    if (chips) drawChips(image, chips, { left: 918, right: 1040, top: plot.top, bottom: plot.bottom, minPrice, maxPrice, yAt });
     image.text("VOLUME", 48, 688, 2, COLORS.muted);
-    image.text(`MAX ${(maxVolume / 10000).toFixed(1)}W`, 876, 688, 2, COLORS.muted);
+    image.text(`MAX ${(maxVolume / 10000).toFixed(1)}W`, chips ? 736 : 876, 688, 2, COLORS.muted);
 
     return encodePng(image);
 }

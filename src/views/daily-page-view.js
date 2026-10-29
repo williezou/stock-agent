@@ -3,6 +3,7 @@ const { deltaText, signedAmount } = require("./fund-flow-view");
 const { formatHotMoneyText, seatLabel } = require("./hot-money-view");
 const { NOTE: LIMIT_UP_NOTE, countsText, industriesText, summarizeLimitUp, yesterdayText } = require("./limit-up-view");
 const { formatLonghuMessage } = require("./longhu-view");
+const { chipsLine } = require("./daily-report-view");
 const { eventsLine } = require("./stock-events-view");
 const { StockLink } = require("./stock-link");
 
@@ -120,7 +121,8 @@ function stockCard({ meta, analysis, plan, news = [], announcements = [], events
         `KDJ ${number(kdj && kdj.k, 1)}/${number(kdj && kdj.d, 1)}/${number(kdj && kdj.j, 1)}`,
         `BOLL ${number(bollinger && bollinger.lower)}/${number(bollinger && bollinger.middle)}/${number(bollinger && bollinger.upper)}`,
         `开/高/低 ${number(latest.open)}/${number(latest.high)}/${number(latest.low)}｜20日量价均价 ${number(analysis.weightedClose20)}`,
-        `盈亏比 ${number(plan.rewardRisk)}:1；跳空可能令实际亏损超过止损幅度`
+        `盈亏比 ${number(plan.rewardRisk)}:1；跳空可能令实际亏损超过止损幅度`,
+        ...(analysis.chips ? [`70%筹码 ${number(analysis.chips.range70.low)}～${number(analysis.chips.range70.high)}（集中度 ${(analysis.chips.range70.concentration * 100).toFixed(1)}%）；筹码按换手率衰减估算，各家口径不同`] : [])
     ];
     return `<div class="card" id="s-${meta.symbol}">`
         + `<div class="stock-head">${StockLink.of(meta, app).html({ code: false })}`
@@ -128,6 +130,7 @@ function stockCard({ meta, analysis, plan, news = [], announcements = [], events
         + `<div class="plan"><b>${escapeHtml(plan.recommendation)}</b>｜回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}｜止损 ${number(plan.stop)}｜目标 ${number(plan.target)}</div>`
         + chartImage(chartUrl, `${meta.name} K线`)
         + `<div class="meta">支撑 ${number(analysis.support)}｜压力 ${number(analysis.resistance)}｜成交 ${money(latest.amount)}｜量比 ${number(analysis.volumeRatio)}x</div>`
+        + (analysis.chips ? `<div class="meta">${escapeHtml(chipsLine(analysis.chips))}</div>` : "")
         + (events.length ? `<div class="event">${eventsLine(events)}</div>` : "")
         + (catalyst ? `<div class="meta">📰 ${linkLine(catalyst)}</div>` : "")
         + `<details><summary>技术指标</summary><div class="tg">${indicators.join("\n")}</div></details>`

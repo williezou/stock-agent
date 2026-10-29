@@ -12,6 +12,13 @@ const STOCK_FOCUS = {
     "002380": "关注工业AI/机器人兑现与高换手风险"
 };
 
+// 筹码（估算）一行：平均成本、获利盘比例、90%筹码区间与集中度；没有筹码数据（缺换手率）时为空
+function chipsLine(chips) {
+    if (!chips) return "";
+    const range90 = chips.range90;
+    return `🧱 筹码（估算）：平均成本 ${number(chips.avgCost)}｜获利盘 ${Math.round(chips.profitRatio * 100)}%｜90%筹码 ${number(range90.low)}～${number(range90.high)}（集中度 ${(range90.concentration * 100).toFixed(1)}%）`;
+}
+
 function formatStockCaption(report, date, app) {
     const { meta, analysis, plan, news = [], announcements = [], events = [] } = report;
     const { latest, ma, macd, rsi, kdj, bollinger } = analysis;
@@ -34,10 +41,11 @@ function formatStockCaption(report, date, app) {
         `⚡ MACD ${number(macd && macd.dif, 3)}/${number(macd && macd.dea, 3)}/${number(macd && macd.histogram, 3)}｜RSI ${number(rsi, 1)}｜K/D/J ${number(kdj && kdj.k, 1)}/${number(kdj && kdj.d, 1)}/${number(kdj && kdj.j, 1)}`,
         `〽️ BOLL 下/中/上 ${number(bollinger && bollinger.lower)}/${number(bollinger && bollinger.middle)}/${number(bollinger && bollinger.upper)}`,
         `🧭 支撑 ${number(analysis.support)}｜压力 ${number(analysis.resistance)}｜20日量价均价 ${number(analysis.weightedClose20)}`,
+        chipsLine(analysis.chips),
         `🎯 <b>${plan.recommendation}</b>｜回踩 ${number(plan.entryLow)}～${number(plan.entryHigh)}｜突破 ${number(plan.breakoutTrigger)}`,
         `🛡 止损 ${number(plan.stop)}｜15%目标 ${number(plan.target)}｜盈亏比 ${number(plan.rewardRisk)}:1`,
-        `🔎 ${focus}；筹码/机构成本不可可靠验证；跳空可能令实际亏损超过8%。`
-    ];
+        `🔎 ${focus}；机构成本不可可靠验证；跳空可能令实际亏损超过8%。`
+    ].filter(Boolean);
     // 超长会撑爆1024字符限制：依次降级为纯文本标题、去掉行情链接说明、去掉事件行，而不是让整次推送失败
     // （按Telegram的口径计算可见文字长度，链接地址不计，正常情况下都能保留）
     const attempts = [
@@ -63,7 +71,7 @@ function formatOverviewCaption(reports, date, app) {
     return [
         `<b>A股每日收盘图览｜${escapeHtml(date)}</b>`,
         ...reports.map(report => formatOverviewRow(report, app)),
-        "红涨、绿跌；橙色MA5；下方为成交量；虚线为支撑与压力。"
+        `红涨、绿跌；橙色MA5；下方为成交量；虚线为支撑与压力${reports.some(report => report.analysis.chips) ? "；个股图右侧为筹码分布（红为获利盘，橙色虚线为平均成本）" : ""}。`
     ].join("\n");
 }
 
@@ -88,6 +96,7 @@ function formatDailyCloseDelivery({ reports, date, app }) {
 }
 
 module.exports = {
+    chipsLine,
     formatDailyCloseDelivery,
     formatOverviewCaption,
     formatOverviewRow,
